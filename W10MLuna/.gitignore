@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+*.user
+AppPackages/
+BundleArtifacts/
+# Laid out per port by assemble-assets.ps1.
+LunaHost/webos/
+LunaHost/Assets/
+LunaHost/Package.appxmanifest
+LunaHost/*.pfx

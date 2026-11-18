@@ -1,0 +1,8 @@
+<Page
+    x:Class="LunaHost.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="Black">
+    <!-- The card: the app's root window, filling the screen below the status bar. -->
+    <WebView x:Name="Card" DefaultBackgroundColor="Black" />
+</Page>

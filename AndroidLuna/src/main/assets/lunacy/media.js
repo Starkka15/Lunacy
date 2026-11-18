@@ -34,7 +34,11 @@ window.__lunacyLocalUrl = function (u) {
 window.__lunacyPageUrl = function (u) {
 	if (typeof u !== "string" || u.slice(0, 8).toLowerCase() !== "file:///") { return u; }
 	var app = /^file:\/\/\/media\/cryptofs\/apps\/usr\/palm\/applications\/([^\/?#]+)(.*)$/i.exec(u);
-	if (app) { return "https://" + app[1] + ".media.cryptofs.apps" + u.slice(7); }
+	if (app) {
+		// A host whose origins aren't https://<appid>.media.cryptofs.apps (W10MLuna) says what they are.
+		var host = window.LunacyNative;
+		return (host && host.appOrigin ? host.appOrigin(app[1]) : "https://" + app[1] + ".media.cryptofs.apps") + u.slice(7);
+	}
 	if (/^file:\/\/\/(usr\/palm|var\/file-cache|var\/luna\/data\/extractfs|media\/internal)\//i.test(u)) { return u.slice(7); }
 	return u;
 };

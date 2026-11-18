@@ -160,8 +160,9 @@
 	var palmSystem = {
 		deviceInfo: N.deviceInfo(),
 		launchParams: launchParams,
-		// "<appid> <pid>", as a device reports it.
-		identifier: location.hostname.replace(/\.media\.cryptofs\.apps$/, "") + " " + (N.processId ? N.processId() : 1000),
+		// "<appid> <pid>", as a device reports it. A host whose origin isn't
+		// <appid>.media.cryptofs.apps (W10MLuna's ms-local-stream) names the app itself.
+		identifier: (N.appId ? N.appId() : location.hostname.replace(/\.media\.cryptofs\.apps$/, "")) + " " + (N.processId ? N.processId() : 1000),
 		version: "Webkit4/V8; device",  // as the TouchPad reports it: not the webOS version
 		locale: locale.locale,
 		localeRegion: locale.localeRegion,
