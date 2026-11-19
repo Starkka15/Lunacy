@@ -66,6 +66,7 @@
     <Compile Include="WebosFs.cs" />
     <Compile Include="JsServices.cs" />
     <Compile Include="Crypto.cs" />
+    <Compile Include="ActivityManager.cs" />
     <Compile Include="NetShim.cs" />
     <Compile Include="Services.cs" />
     <Compile Include="Sqlite.cs" />

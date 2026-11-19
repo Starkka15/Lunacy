@@ -13,7 +13,12 @@
 	var W = window.__lunacyWindow;
 	var G = window;
 
+	// A message of at most 40 lines: Palm's futures nest each callback inside the last, and one
+	// error's stack ran to thousands of frames, written to the phone's log each time.
 	function hostLog(level, text) {
+		text = String(text);
+		var lines = text.split("\n");
+		if (lines.length > 40) { text = lines.slice(0, 40).join("\n") + "\n   ... " + (lines.length - 40) + " more lines"; }
 		try { H.console(W, level, text); } catch (e) {}
 	}
 

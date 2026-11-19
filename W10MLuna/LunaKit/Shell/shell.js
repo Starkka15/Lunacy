@@ -564,8 +564,6 @@
 
 	window.__lunacyShell = {
 		windowOf: windowOf,
-		// The window that opened this one, as the shell recorded it (w10m-native.js).
-		openerOf: function (id) { var w = windows[id]; return (w && w.opener) || null; },
 		setZoom: setZoom,
 		// A JS service package's frame (JsServices.cs): hidden, never one of an app's windows.
 		// A service frame is its bus name, as its process was on the bus (the window's id names its

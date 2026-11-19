@@ -64,11 +64,15 @@ namespace LunaKit
             TempDb.Register(Bus);
             Fs = new WebosFs(Path.Combine(ApplicationData.Current.LocalFolder.Path, "webos"), Rom, Apps);
             Services = new JsServices(this, Fs);
+            // After db8, which it reads its persisted activities from; it runs none until Start.
+            Activities = new ActivityManager(Bus);
+            Activities.Register();
         }
 
         /// The webOS filesystem JS services see, and the services themselves.
         internal readonly WebosFs Fs;
         internal readonly JsServices Services;
+        internal readonly ActivityManager Activities;
 
         /// The webOS root's read-only part (assemble-assets.ps1: the ROM's /usr/palm and /etc).
         internal readonly string Rom;
@@ -81,6 +85,8 @@ namespace LunaKit
             Apps.Scan();
             new Configurator(Apps, Db, TempDb, Rom, Bus).Run();
             Services.Scan();
+            Activities.Enable();
+            Windows.UI.Xaml.Application.Current.Resuming += (s, e) => Activities.Resumed();
             Measure();
             LunaLog.Write("[LunaKit] shell starting as " + Profile.Name + " " + deviceInfo);
             Windows.UI.Xaml.Window.Current.VisibilityChanged += (s, e) => display.Visible(e.Visible);
