@@ -108,6 +108,17 @@ try {
     }
 } finally { $zip.Dispose() }
 
+# Enyo's makeAbsoluteUrl takes a URL as absolute only if its scheme is letters alone; W10M's
+# ms-local-stream: has hyphens, so Enyo glued an app's own absolute URLs onto its folder
+# (Email's card). The scheme as RFC 3986 has it.
+foreach ($rel in @('fw\enyo\1.0\framework\build\enyo-build.js', 'fw\enyo\1.0\framework\source\dom\util.js')) {
+    $f = Join-Path $dest $rel
+    if (-not (Test-Path $f)) { continue }
+    $t = [IO.File]::ReadAllText($f)
+    $u = $t.Replace('new RegExp("^([a-z]+:/)?/")', 'new RegExp("^([a-z][a-z0-9+.-]*:/)?/", "i")')
+    if ($u -ne $t) { [IO.File]::WriteAllText($f, $u, (New-Object Text.UTF8Encoding($false))) } else { Write-Warning "assemble-assets: Enyo's makeAbsoluteUrl not found in $rel" }
+}
+
 # The apps, each in a folder named by its id.
 $folders = @(Get-ChildItem (Join-Path $repo 'CoreApps') -Directory | ForEach-Object FullName) + @($App | ForEach-Object { (Resolve-Path $_).Path })
 $ids = @()

@@ -120,16 +120,19 @@ namespace LunaKit
             running[dir] = p;
             LunaLog.Write("[services] starting " + dir);
             var url = AppServer.ServicePage + "?dir=" + Uri.EscapeDataString(dir) + "&name=" + Uri.EscapeDataString(p.Name);
-            shell.Ui(async () =>
+            // Always posted, never run inside the bridge call that asked: the WebView refuses a
+            // script while one of its own is calling out (0x80020101).
+            var _ = shell.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, async () =>
             {
                 try
                 {
-                    var r = await shell.View.InvokeScriptAsync("eval", new[] { "String(__lunacyShell.startService(" + J.Str(p.Name) + "," + J.Str(url) + "))" });
+                    var r = await shell.View.InvokeScriptAsync("eval", new[] {
+                        "(function(){try{return String(__lunacyShell.startService(" + J.Str(p.Name) + "," + J.Str(url) + "))}catch(e){return 'error: '+(e&&e.message||e)}})()" });
                     int win;
-                    if (!int.TryParse(r, out win)) { LunaLog.Write("[services] " + dir + ": no frame (" + r + ")"); return; }
+                    if (!int.TryParse(r, out win)) { Stop(p, "has no frame (" + r + ")"); return; }
                     lock (gate) { p.Window = win; byWindow[win] = p; }
                 }
-                catch (Exception e) { LunaLog.Write("[services] " + dir + ": frame failed: " + e.Message); }
+                catch (Exception e) { Stop(p, "frame failed: " + e.Message); }
             });
             return p;
         }
