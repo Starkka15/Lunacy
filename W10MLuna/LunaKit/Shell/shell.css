@@ -114,7 +114,18 @@ body.launcher #launcher { display: block; }
 	overflow: hidden; max-height: 30px; word-wrap: break-word;
 }
 
-/* The swipe up from the bottom edge (15 px band, LunaCE's kGestureBorderSize): a maximized
-   card goes to the card view. */
-#edge { position: absolute; left: 0; right: 0; bottom: 0; height: 15px; display: none; }
+/* The gesture area, as under the Pre's screen: a swipe up from it sends a maximized card to the
+   card view. LunaCE's 15 px edge band sits against Windows' navigation bar here, which takes
+   swipes from the bottom, so it is a bar of its own above it, and the card ends where it begins. */
+#edge {
+	position: absolute; left: 0; right: 0; bottom: 0; height: 28px; display: none; z-index: 20;
+	background: #000; -ms-touch-action: none; touch-action: none;
+}
+#edge::after {
+	content: ""; position: absolute; left: 50%; top: 12px; width: 96px; height: 4px; margin-left: -48px;
+	border-radius: 2px; background: radial-gradient(ellipse at center, #9cf 0%, #36a 60%, transparent 100%);
+	opacity: 0.6; transition: opacity 150ms;
+}
+#edge.lit::after { opacity: 1; }
 body.maximized #edge { display: block; }
+body.maximized #notifications, body.maximized #popups { bottom: 28px; }

@@ -227,11 +227,12 @@
 
 	function stageSize() { return { w: window.innerWidth, h: window.innerHeight }; }
 	var CARD_SCALE = 0.6, CARD_GAP = 16;
+	var GESTURE = 28;   // the gesture area's height (shell.css #edge)
 
 	function layoutAll() {
 		var s = stageSize();
 		var notes = $("notifications").offsetHeight || 0;
-		var cardH = s.h - (maximized ? notesHeightWhenMax() : 0);
+		var cardH = s.h - GESTURE - (maximized ? notesHeightWhenMax() : 0);
 		var step = s.w * CARD_SCALE + CARD_GAP;
 		cards.forEach(function (id, i) {
 			var win = windows[id];
@@ -355,8 +356,11 @@
 		var edge = $("edge");
 		edge.addEventListener("pointerdown", function (e) {
 			var y0 = e.clientY, done = false;
-			function move(ev) { if (!done && y0 - ev.clientY > 15) { done = true; minimize(); } }
+			edge.classList.add("lit");
+			try { edge.setPointerCapture(e.pointerId); } catch (x) {}
+			function move(ev) { if (!done && y0 - ev.clientY > 20) { done = true; log("gesture: card view"); minimize(); } }
 			function up() {
+				edge.classList.remove("lit");
 				window.removeEventListener("pointermove", move);
 				window.removeEventListener("pointerup", up);
 				window.removeEventListener("pointercancel", up);
