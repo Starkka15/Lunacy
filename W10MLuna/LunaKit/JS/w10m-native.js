@@ -140,6 +140,40 @@
 		};
 	}
 
+	// A file:// URL that reaches a frame or an image without passing media.js's src hooks (in
+	// markup, or where EdgeHTML's own src accessor won't take the hook) names nothing on
+	// ms-local-stream, and the frame stays blank: Calendar's Windows account page, which Enyo's
+	// CrossAppUI loads from the application manager's file:// base path. The element is pointed
+	// at the same file on Lunacy's origin (media.js's __lunacyPageUrl), and the shell's log says so.
+	if (window.MutationObserver) {
+		var fixSrc = function (el) {
+			var tag = el.tagName;
+			if (tag !== "IFRAME" && tag !== "IMG") { return; }
+			var u = el.getAttribute("src");
+			if (!u || u.slice(0, 8).toLowerCase() !== "file:///" || !window.__lunacyPageUrl) { return; }
+			var m = window.__lunacyPageUrl(u);
+			if (m === u) { return; }
+			H.log(W, "file URL in " + tag.toLowerCase() + " mapped: " + u.split("?")[0]);
+			el.setAttribute("src", m);
+			if (el.getAttribute("src") !== m) { el.src = m; }
+		};
+		var scan = function (node) {
+			if (!node || node.nodeType !== 1) { return; }
+			fixSrc(node);
+			if (node.getElementsByTagName) {
+				var list = node.querySelectorAll("iframe[src^='file:'], img[src^='file:']");
+				for (var i = 0; i < list.length; i++) { fixSrc(list[i]); }
+			}
+		};
+		new MutationObserver(function (records) {
+			for (var i = 0; i < records.length; i++) {
+				var r = records[i];
+				if (r.type === "attributes") { fixSrc(r.target); continue; }
+				for (var j = 0; j < r.addedNodes.length; j++) { scan(r.addedNodes[j]); }
+			}
+		}).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+	}
+
 	// On webOS a card was its own top window; here top is the shell's page. Enyo finds its app's
 	// root window as opener || rootWindow || top, and when the root goes it hands the role on by
 	// setting the new root's rootWindow to null: so an empty rootWindow means this window, never
