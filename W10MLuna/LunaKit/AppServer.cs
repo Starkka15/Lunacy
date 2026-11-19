@@ -28,6 +28,8 @@ namespace LunaKit
     {
         public const string AppsPath = "media/cryptofs/apps/usr/palm/applications/";
         public const string ShellPage = "/__lunacy/shell/index.html";
+        /// A JS service package's frame (JsServices.cs).
+        public const string ServicePage = "/__lunacy/shell/service/index.html";
         /// A file read through palmGetResource comes back as it is on disk.
         public const string ResourceParam = "__lunacy_res";
         /// The longest a page waits for its fonts before its own scripts run anyway.

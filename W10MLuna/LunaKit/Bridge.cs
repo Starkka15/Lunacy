@@ -45,6 +45,13 @@ namespace LunaKit
         public string SqlResult(int win, int id) { var w = W(win); return w == null ? "" : w.Sql.Result(id); }
 
         // Where pages run.
+        // JS services (JsServices.cs, lunacy/service/): the frame's protocol messages, the
+        // webOS filesystem, and hashes for node.js's crypto.
+        public void ServiceSend(int win, string json) { shell.Services.FromService(win, json); }
+        public string Fs(string op, string args) { return shell.Fs.Op(op, args); }
+        public string Hash(string alg, string base64, string keyBase64) { return Crypto.Hash(alg, base64, keyBase64); }
+        public string RandomBytes(int n) { return Crypto.Random(n); }
+
         public string Origin() { return shell.Origin; }
         public string ScreenOrientation() { return shell.Orientation; }
 

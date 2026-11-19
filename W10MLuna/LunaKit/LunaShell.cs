@@ -62,7 +62,13 @@ namespace LunaKit
             Db.Register(Bus);
             TempDb = new Db8("com.palm.tempdb", null);
             TempDb.Register(Bus);
+            Fs = new WebosFs(Path.Combine(ApplicationData.Current.LocalFolder.Path, "webos"), Rom, Apps);
+            Services = new JsServices(this, Fs);
         }
+
+        /// The webOS filesystem JS services see, and the services themselves.
+        internal readonly WebosFs Fs;
+        internal readonly JsServices Services;
 
         /// The webOS root's read-only part (assemble-assets.ps1: the ROM's /usr/palm and /etc).
         internal readonly string Rom;
@@ -74,6 +80,7 @@ namespace LunaKit
         {
             Apps.Scan();
             new Configurator(Apps, Db, TempDb, Rom, Bus).Run();
+            Services.Scan();
             Measure();
             LunaLog.Write("[LunaKit] shell starting as " + Profile.Name + " " + deviceInfo);
             Windows.UI.Xaml.Window.Current.VisibilityChanged += (s, e) => display.Visible(e.Visible);
@@ -90,6 +97,7 @@ namespace LunaKit
             {
                 // The shell's page is the only top-level document; every window is a frame of
                 // it and reaches the bridge through top.LunaHost (w10m-native.js).
+                if (Services != null) Services.Reset();
                 foreach (var w in windows.Values) w.Close();
                 windows.Clear();
                 View.AddWebAllowedObject("LunaHost", bridge);

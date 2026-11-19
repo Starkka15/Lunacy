@@ -111,6 +111,7 @@ namespace LunaKit
             public int Timeout;
             public bool Binary;
             public string Charset;
+            public bool Node;
         }
 
         private async Task<string> Run(string request, CancellationToken token)
@@ -133,7 +134,10 @@ namespace LunaKit
                 }
             }
             var given = new HashSet<string>(headers.Select(h => h.Key.ToLowerInvariant()));
-            Action<string, string> byDefault = (k, v) => { if (!given.Contains(k.ToLowerInvariant())) headers.Add(new KeyValuePair<string, string>(k, v)); };
+            // A JS service's request (node.js's http): only the headers it set, and redirects
+            // handed back to it, as Node's http client did.
+            bool node = j.GetBool("node");
+            Action<string, string> byDefault = (k, v) => { if (!node && !given.Contains(k.ToLowerInvariant())) headers.Add(new KeyValuePair<string, string>(k, v)); };
             byDefault("User-Agent", profile.UserAgent);
             byDefault("X-Palm-Carrier", profile.CarrierCode);
             byDefault("Accept", "*/*");
@@ -148,7 +152,7 @@ namespace LunaKit
             var b = j.GetString("body");
             if (b != null) body = j.GetBool("bodyBase64") ? Convert.FromBase64String(b) : Encoding.UTF8.GetBytes(b);
             var req = new Req { Method = method, Url = url, Headers = headers, Body = body, Timeout = j.GetInt("timeout"),
-                                Binary = j.GetBool("binary"), Charset = j.GetString("charset", "") };
+                                Binary = j.GetBool("binary"), Charset = j.GetString("charset", ""), Node = node };
             try { return await Hops(req, token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!token.IsCancellationRequested)
             {
@@ -191,7 +195,7 @@ namespace LunaKit
                         int status = (int)resp.StatusCode;
                         string loc;
                         Uri next;
-                        if (status >= 300 && status <= 399 && status != 304 && resp.Headers.TryGetValue("Location", out loc) &&
+                        if (!req.Node && status >= 300 && status <= 399 && status != 304 && resp.Headers.TryGetValue("Location", out loc) &&
                             Uri.TryCreate(req.Url, loc, out next))
                         {
                             if (count >= MaxRedirects) return Error("too many redirects", "error");

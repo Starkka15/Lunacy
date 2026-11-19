@@ -81,17 +81,24 @@ try {
     # both under fw/): version/1.0 is a link to submission/N, Mojo's art links into mojocommon,
     # and Enyo's build/g11n into source/. An appx can't hold a link either, so each becomes a
     # copy of what it points at; a few passes cover a link inside a linked folder.
-    $linkEntry = $zip.GetEntry('assets/fw.links')
+    # The ROM's own (rootfs.links) likewise: the service frameworks' version/1.0, under usr/palm.
     $links = @()
-    if ($linkEntry) {
+    foreach ($table in @(@('assets/fw.links', 'fw'), @('assets/rootfs.links', 'rootfs'))) {
+        $linkEntry = $zip.GetEntry($table[0])
+        if (-not $linkEntry) { continue }
         $r = New-Object IO.StreamReader($linkEntry.Open())
-        try { while (($l = $r.ReadLine()) -ne $null) { $p = $l -split ' ', 2; if ($p.Count -eq 2) { $links += ,@($p[0], $p[1]) } } } finally { $r.Dispose() }
+        try {
+            while (($l = $r.ReadLine()) -ne $null) {
+                $p = $l -split ' ', 2
+                if ($p.Count -eq 2 -and ($table[1] -eq 'fw' -or $p[0] -like 'usr/palm/*')) { $links += ,@($p[0], $p[1], $table[1]) }
+            }
+        } finally { $r.Dispose() }
     }
     for ($pass = 0; $pass -lt 4; $pass++) {
         $made = 0
         foreach ($k in $links) {
-            $from = Join-Path $dest ('fw\' + ($k[1] -replace '/', '\'))
-            $to = Join-Path $dest ('fw\' + ($k[0] -replace '/', '\'))
+            $from = Join-Path $dest ($k[2] + '\' + ($k[1] -replace '/', '\'))
+            $to = Join-Path $dest ($k[2] + '\' + ($k[0] -replace '/', '\'))
             if ((Test-Path $to) -or -not (Test-Path $from)) { continue }
             New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
             Copy-Item -Recurse $from $to

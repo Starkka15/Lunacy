@@ -69,9 +69,23 @@ namespace LunaKit
             lock (handlers) handlers[service + "/" + method] = h;
         }
 
+        private readonly Dictionary<string, Action<Call>> services = new Dictionary<string, Action<Call>>();
+
+        /// Every method of a service, for a JS service package: the package answers what it has
+        /// and errors for what it hasn't, as ls-hubd passed it every call to its name.
+        public void RegisterService(string service, Action<Call> h)
+        {
+            lock (handlers) services[service] = h;
+        }
+
+        public void UnregisterService(string service)
+        {
+            lock (handlers) services.Remove(service);
+        }
+
         public bool Has(string service)
         {
-            lock (handlers) return handlers.Keys.Any(k => k.StartsWith(service + "/", StringComparison.Ordinal));
+            lock (handlers) return services.ContainsKey(service) || handlers.Keys.Any(k => k.StartsWith(service + "/", StringComparison.Ordinal));
         }
 
         public Call Dispatch(string appId, string url, string parameters, Action<string> reply)
@@ -81,7 +95,7 @@ namespace LunaKit
             if (m.Success) { service = m.Groups[1].Value; method = m.Groups[2].Value; }
             var c = new Call(appId, service, method, J.ParseObject(parameters), reply) { Raw = string.IsNullOrEmpty(parameters) ? "{}" : parameters };
             Action<Call> h;
-            lock (handlers) handlers.TryGetValue(service + "/" + method, out h);
+            lock (handlers) { if (!handlers.TryGetValue(service + "/" + method, out h)) services.TryGetValue(service, out h); }
             LunaLog.Write("[LunaKit] bus [" + appId + "] " + service + "/" + method + (h == null ? " UNHANDLED" : ""));
             if (h != null)
             {

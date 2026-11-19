@@ -138,13 +138,14 @@
 			if (maximized === id) { maximized = null; }
 			win.box.parentNode.removeChild(win.box);
 			if (focusIndex >= cards.length) { focusIndex = Math.max(0, cards.length - 1); }
-		} else if (win.type === "hidden") {
+		} else if (win.type === "hidden" || win.type === "service") {
 			win.frame.parentNode.removeChild(win.frame);
 		} else {
 			win.box.parentNode.removeChild(win.box);
 		}
 		H.windowClosed(id);
 		log("closed " + win.type + " " + id + " " + win.appId);
+		if (win.type === "service") { return; }
 		// An app whose last card or dashboard closes is closed, its hidden root too: on webOS an
 		// app lived as long as one of its windows did (a noWindow app's root keeps it alive only
 		// until its windows are gone if it has none to show).
@@ -564,6 +565,9 @@
 	window.__lunacyShell = {
 		windowOf: windowOf,
 		setZoom: setZoom,
+		// A JS service package's frame (JsServices.cs): hidden, never one of an app's windows.
+		startService: function (name, url) { return makeWindow("service:" + name, "service", url, null, "", {}).id; },
+		stopService: function (id) { closeWindow(id, true); },
 		// applicationManager/updateLaunchPointIcon: the launcher and dock draw the new icon.
 		setIcon: function (appId, url) {
 			if (!apps[appId]) { return; }

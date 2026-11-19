@@ -63,6 +63,9 @@
     <Compile Include="Db8.cs" />
     <Compile Include="Configurator.cs" />
     <Compile Include="SystemService.cs" />
+    <Compile Include="WebosFs.cs" />
+    <Compile Include="JsServices.cs" />
+    <Compile Include="Crypto.cs" />
     <Compile Include="NetShim.cs" />
     <Compile Include="Services.cs" />
     <Compile Include="Sqlite.cs" />
