@@ -25,6 +25,21 @@
 	var S = __LUNACY_STATIC__;
 	var W = Shell.windowOf(window);
 	var root = window.parent === T;   // this window's own page, not a frame inside it
+
+	// The device's user agent, as Android sets its WebView's (AppWindow.kt): webOS apps tell
+	// webOS from elsewhere by it (hpwOS/3, webOS/2), App Catalog among them. A UWP WebView's
+	// navigator.userAgent can't be set from the host, so it is defined here, on the navigator
+	// and, where EdgeHTML won't take that, on its prototype in this frame.
+	(function (ua) {
+		if (!ua) { return; }
+		var get = { get: function () { return ua; }, configurable: true };
+		var appVersion = { get: function () { return ua.replace(/^Mozilla\//, ""); }, configurable: true };
+		try { Object.defineProperty(navigator, "userAgent", get); Object.defineProperty(navigator, "appVersion", appVersion); } catch (e) {}
+		if (navigator.userAgent !== ua) {
+			try { Object.defineProperty(Navigator.prototype, "userAgent", get); Object.defineProperty(Navigator.prototype, "appVersion", appVersion); } catch (e) {}
+		}
+		if (navigator.userAgent !== ua) { try { H.log(W, "w10m-native: navigator.userAgent can't be set"); } catch (e) {} }
+	})(S.userAgent);
 	if (root) { H.pageStart(W); }
 
 	// WinRT turns undefined into the string "undefined" and NaN into 0; say what is meant.

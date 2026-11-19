@@ -535,7 +535,7 @@ namespace LunaKit
         /// The values w10m-native.js is served with for one app's pages.
         private string StaticsFor(string appId)
         {
-            return J.Obj(J.P("appId", appId), J.P("deviceInfo", deviceInfo), J.P("localeInfo", localeInfo), J.P("processId", pid));
+            return J.Obj(J.P("appId", appId), J.P("deviceInfo", deviceInfo), J.P("localeInfo", localeInfo), J.P("processId", pid), J.P("userAgent", Profile.UserAgent));
         }
 
         /// What the shell's page needs at start: the apps, and how pages are laid out.
