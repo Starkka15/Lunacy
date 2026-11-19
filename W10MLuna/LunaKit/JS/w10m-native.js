@@ -41,6 +41,14 @@
 		if (navigator.userAgent !== ua) { try { H.log(W, "w10m-native: navigator.userAgent can't be set"); } catch (e) {} }
 	})(S.userAgent);
 	if (root) { H.pageStart(W); }
+	// A page inside a window's page (Enyo's CrossAppUI: an account wizard in Email or Calendar)
+	// has no window of its own, so the shell's log says nothing of it unless it does.
+	else {
+		try { H.log(W, "frame " + S.appId + " starting " + location.pathname); } catch (e) {}
+		window.addEventListener("load", function () {
+			try { H.log(W, "frame " + S.appId + " loaded, " + (document.body ? document.body.innerHTML.length : -1) + " chars of body"); } catch (e) {}
+		});
+	}
 
 	// WinRT turns undefined into the string "undefined" and NaN into 0; say what is meant.
 	function s(v) { return v === undefined || v === null ? "" : String(v); }
