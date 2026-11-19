@@ -77,6 +77,28 @@ try {
         [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true)
         $romFiles++
     }
+    # The framework trees' symlinks, which fetch-assets.sh records in fw.links ("link target",
+    # both under fw/): version/1.0 is a link to submission/N, Mojo's art links into mojocommon,
+    # and Enyo's build/g11n into source/. An appx can't hold a link either, so each becomes a
+    # copy of what it points at; a few passes cover a link inside a linked folder.
+    $linkEntry = $zip.GetEntry('assets/fw.links')
+    $links = @()
+    if ($linkEntry) {
+        $r = New-Object IO.StreamReader($linkEntry.Open())
+        try { while (($l = $r.ReadLine()) -ne $null) { $p = $l -split ' ', 2; if ($p.Count -eq 2) { $links += ,@($p[0], $p[1]) } } } finally { $r.Dispose() }
+    }
+    for ($pass = 0; $pass -lt 4; $pass++) {
+        $made = 0
+        foreach ($k in $links) {
+            $from = Join-Path $dest ('fw\' + ($k[1] -replace '/', '\'))
+            $to = Join-Path $dest ('fw\' + ($k[0] -replace '/', '\'))
+            if ((Test-Path $to) -or -not (Test-Path $from)) { continue }
+            New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
+            Copy-Item -Recurse $from $to
+            $made++
+        }
+        if ($made -eq 0) { break }
+    }
 } finally { $zip.Dispose() }
 
 # The apps, each in a folder named by its id.
