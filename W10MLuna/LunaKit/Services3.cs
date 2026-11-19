@@ -502,6 +502,7 @@ namespace LunaKit
         {
             var dir = WebosFs.Normal(rec.DestPath);
             var temp = dir + "/" + TempPrefix + rec.DestFile;
+            LunaLog.Write("[download] " + rec.Ticket + " start " + rec.Url + " -> " + rec.Target);
             try
             {
                 if (!fs.Exists(dir)) fs.MakeDir(dir, true);
@@ -534,6 +535,7 @@ namespace LunaKit
                 if (fs.Exists(rec.Target)) fs.Remove(rec.Target, false, false);
                 fs.Rename(temp, rec.Target);
                 rec.Completed = true;
+                LunaLog.Write("[download] " + rec.Ticket + " done, HTTP " + rec.Http + ", " + rec.Received + " bytes");
             }
             catch (Exception e)
             {

@@ -49,13 +49,15 @@ if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
 New-Item -ItemType Directory -Force (Join-Path $dest 'lunacy'), (Join-Path $dest 'apps'), (Join-Path $dest 'luna') | Out-Null
 
 # The page-side scripts only: services\ and the Mojo boot files are for later (SHELL.md).
-foreach ($f in 'input.js', 'engine.js', 'media.js', 'layout.js', 'bridge.js', 'crypt.js', 'textedit.js', 'net.js', 'websql.js', 'fonts.css') {
+foreach ($f in 'input.js', 'engine.js', 'media.js', 'layout.js', 'bridge.js', 'crypt.js', 'textedit.js', 'net.js', 'websql.js', 'fonts.css', 'mojo-prelude.js', 'mojo-boot.js') {
     Copy-Item (Join-Path $assets "lunacy\$f") (Join-Path $dest "lunacy\$f")
 }
 Copy-Item (Join-Path $here 'LunaKit\JS\w10m-native.js') (Join-Path $dest 'lunacy\w10m-native.js')
 Copy-Item -Recurse (Join-Path $here 'LunaKit\Shell') (Join-Path $dest 'shell')
 foreach ($d in 'images', 'wallpapers', 'sounds', 'ringtones') { Copy-Item -Recurse (Join-Path $assets "luna\$d") (Join-Path $dest "luna\$d") }
 Copy-Item (Join-Path $assets 'luna\*.json') (Join-Path $dest 'luna')
+# webOS's system UI that apps load by path (Enyo's FilePicker, the alerts' styles) and Just Type's icons.
+foreach ($d in 'luna-systemui', 'luna-applauncher') { Copy-Item -Recurse (Join-Path $assets $d) (Join-Path $dest $d) }
 Copy-Item -Recurse (Join-Path $assets 'luna\fonts') (Join-Path $dest 'fonts')
 New-Item -ItemType Directory -Force (Join-Path $dest 'fw\enyo') | Out-Null
 Copy-Item -Recurse $Enyo (Join-Path $dest 'fw\enyo\1.0')

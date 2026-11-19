@@ -39,6 +39,30 @@ namespace LunaKit
         private static readonly Regex FrameworksPath = new Regex("(?:^|/)usr/palm/frameworks/");
         private static readonly Regex Head = new Regex("<head[^>]*>", RegexOptions.IgnoreCase);
         private static readonly Regex Doctype = new Regex("^\\s*<!doctype[^>]*>", RegexOptions.IgnoreCase);
+        /// A page that loads Mojo, either version (AppServer.kt's MOJO_TAG). webOS's browser had
+        /// the framework compiled in and mojo.js looks for it as a global, so the builtins that
+        /// carry it are served in front of the app's own tag.
+        private static readonly Regex MojoTag = new Regex("<script[^>]*src=\"[^\"]*?/usr/palm/frameworks/(mojo|mojo2)/mojo\\.js[^\"]*\"[^>]*>\\s*</script>", RegexOptions.IgnoreCase);
+        private static readonly Regex MojoVersion = new Regex("x-mojo-(version|submission)=\"([^\"]*)\"", RegexOptions.IgnoreCase);
+        /// Mojo 1's own version table: x-mojo-version 1 is submission 506.
+        private static readonly System.Collections.Generic.Dictionary<string, string> MojoSubmissions = new System.Collections.Generic.Dictionary<string, string> { { "1", "506" }, { "2", "344" } };
+        /// What MojoLoader looks for: a Mojo 2 page gets them all, since it asks for mojo.core
+        /// before the framework itself has loaded.
+        private static readonly string[] Mojo2Libraries = { "palmunderscoreVersion1_0", "palmfoundationsVersion1_0", "palmglobalizationVersion1_0", "palmmojo_coreVersion1_0" };
+        /// webOS's system UI, which apps reach at its absolute path (Enyo's FilePicker loads
+        /// luna-systemui/app/FilePicker/filepicker.html in an iframe), and Just Type's icons.
+        private const string SystemUi = "usr/lib/luna/system/luna-systemui/app/";
+        private const string SystemUiUtils = "usr/lib/luna/system/luna-systemui/utils/";
+        private const string SystemUiStyles = "usr/lib/luna/system/luna-systemui/stylesheets/";
+        private const string SystemUiImages = "usr/lib/luna/system/luna-systemui/images/";
+        private const string SearchIcons = "usr/lib/luna/system/luna-applauncher/images/";
+        /// Mojo's images that the Pre3 drew differently from the TouchPad (luna/images/pre3/NOTICE).
+        private const string MojoImages = "usr/palm/frameworks/mojocommon/images/";
+        private static readonly string[] Pre3MojoImages = { "dashboard-container.png", "dashboard-container-active.png", "dashboard-container-sprite.png" };
+        private const string Cryptofs = "media/cryptofs/apps/";
+        /// Dashboards along the bottom, as the Pre3's: Mojo's dashboard boxes are the Pre3's
+        /// (the TouchPad's are transparent, its dashboards sitting in the drop-down).
+        public bool Pre3Dashboards = true;
 
         private readonly AppRegistry apps;
         private readonly string assets;
@@ -134,9 +158,39 @@ namespace LunaKit
                 return Bytes(Transform(tree, path, resource, null));
             }
 
+            // The rest of the webOS tree pages read by path (AppServer.kt's ROOT_READABLE and
+            // CRYPTOFS): the system's files under /usr/palm - the writable layer's over the ROM's,
+            // as account templates' icons are - and what installed packages put under cryptofs
+            // beyond their apps' folders. The frameworks and the apps have their own routes.
+            if (Fs != null && !FrameworksPath.IsMatch(path) && !path.StartsWith(AppsPath, StringComparison.Ordinal)
+                && (path.StartsWith("usr/palm/", StringComparison.Ordinal) || path.StartsWith(Cryptofs, StringComparison.Ordinal)))
+            {
+                byte[] tree = null;
+                try { tree = await Task.Run(() => Fs.Exists("/" + path) && !Fs.IsDir("/" + path) ? Fs.Read("/" + path) : null).ConfigureAwait(false); }
+                catch (WebosFs.FsError) { }
+                catch (UnauthorizedAccessException) { }
+                if (tree == null) { LunaLog.Write("[LunaKit] 404 /" + path); throw new FileNotFoundException(uri.ToString()); }
+                return Bytes(Transform(tree, path, resource, null));
+            }
+
             string file = null, root = assets, appId = null;
             Match enyo;
-            if (path.StartsWith("__lunacy/fonts/", StringComparison.Ordinal)) file = Path.Combine(assets, "fonts", path.Substring("__lunacy/fonts/".Length));
+            if (path.StartsWith(SystemUi, StringComparison.Ordinal)) file = Path.Combine(assets, "luna-systemui", path.Substring(SystemUi.Length));
+            else if (path.StartsWith(SystemUiUtils, StringComparison.Ordinal)) file = Path.Combine(assets, "luna-systemui", "utils", path.Substring(SystemUiUtils.Length));
+            else if (path.StartsWith(SystemUiStyles, StringComparison.Ordinal)) file = Path.Combine(assets, "luna-systemui", "stylesheets", path.Substring(SystemUiStyles.Length));
+            else if (path.StartsWith(SystemUiImages, StringComparison.Ordinal)) file = Path.Combine(assets, "luna-systemui", "images", path.Substring(SystemUiImages.Length));
+            else if (path.StartsWith(SearchIcons, StringComparison.Ordinal)) file = Path.Combine(assets, "luna-applauncher", "images", path.Substring(SearchIcons.Length));
+            else if (Pre3Dashboards && path.StartsWith(MojoImages, StringComparison.Ordinal) && Pre3MojoImages.Contains(path.Substring(MojoImages.Length)))
+                file = Path.Combine(assets, "luna", "images", "pre3", "mojo", path.Substring(MojoImages.Length));
+            else if (!resource && (path == "usr/palm/frameworks/mojo/mojo.js" || path == "usr/palm/frameworks/mojo2/mojo.js"))
+            {
+                // mojo.js with mojo-prelude.js in front, for a page that writes the tag from a
+                // script (an Ares app's ares.js), where the HTML transform can't see it.
+                var js = await ReadText(Path.Combine(assets, "fw", path.Contains("/mojo2/") ? Path.Combine("frameworks", "mojo2", "mojo.js") : Path.Combine("mojo", "mojo.js"))).ConfigureAwait(false);
+                var prelude = await ReadText(Path.Combine(assets, "lunacy", "mojo-prelude.js")).ConfigureAwait(false);
+                return Text(prelude + "\n" + JsTransforms.SloppyMode(js));
+            }
+            else if (path.StartsWith("__lunacy/fonts/", StringComparison.Ordinal)) file = Path.Combine(assets, "fonts", path.Substring("__lunacy/fonts/".Length));
             else if (path.StartsWith("__lunacy/shell/", StringComparison.Ordinal)) file = Path.Combine(assets, "shell", path.Substring("__lunacy/shell/".Length));
             else if (path.StartsWith("__lunacy/luna/", StringComparison.Ordinal)) file = Path.Combine(assets, "luna", path.Substring("__lunacy/luna/".Length));
             else if (path.StartsWith("__lunacy/", StringComparison.Ordinal)) file = Path.Combine(assets, "lunacy", path.Substring("__lunacy/".Length));
@@ -252,10 +306,40 @@ namespace LunaKit
                 "<script src=\"/__lunacy/net.js\"></script><script src=\"/__lunacy/websql.js\"></script>" +
                 "<script src=\"/__lunacy/fonts-ready.js?t=" + token + "\"></script>";
             var m = Head.Match(html);
-            if (m.Success) return html.Substring(0, m.Index + m.Length) + tag + html.Substring(m.Index + m.Length);
+            if (m.Success) return MojoBuiltins(html.Substring(0, m.Index + m.Length) + tag + html.Substring(m.Index + m.Length));
             // No <head>: after the doctype, which has to stay first or the page drops to quirks mode.
             var d = Doctype.Match(html);
-            return d.Success ? html.Substring(0, d.Index + d.Length) + tag + html.Substring(d.Index + d.Length) : tag + html;
+            return MojoBuiltins(d.Success ? html.Substring(0, d.Index + d.Length) + tag + html.Substring(d.Index + d.Length) : tag + html);
+        }
+
+        /// Mojo's builtins in front of the page's mojo.js tag, and mojo-boot.js after them
+        /// (AppServer.kt's mojoBuiltins): mojo.js then finds its palmInitFramework global as on
+        /// a device. The submission comes from the tag, as mojo.js reads it; Mojo 2's loader has
+        /// no version map, defaults to 205 and takes only x-mojo-submission.
+        private static string MojoBuiltins(string html)
+        {
+            var tag = MojoTag.Match(html);
+            if (!tag.Success) return html;
+            bool two = tag.Groups[1].Value.Equals("mojo2", StringComparison.OrdinalIgnoreCase);
+            var attr = MojoVersion.Match(tag.Value);
+            string submission;
+            if (two)
+            {
+                var s = attr.Success && attr.Groups[1].Value.Equals("submission", StringComparison.OrdinalIgnoreCase) ? attr.Groups[2].Value : "";
+                submission = "2" + (s.Length > 0 ? s : "205");
+            }
+            else
+            {
+                var version = attr.Success ? attr.Groups[2].Value : "";
+                string mapped;
+                submission = MojoSubmissions.TryGetValue(version, out mapped) ? mapped : version.Length > 0 ? version : "506";
+            }
+            // Mojo 2 takes Prototype from its own framework; only Mojo 1 needs the builtin copy.
+            var libraries = two ? Mojo2Libraries : new[] { "InstallPrototypeBuiltIn" };
+            var boot = string.Concat(libraries.Select(l => "<script src=\"/usr/palm/frameworks/mojo/builtins/" + l + ".js\"></script>")) +
+                "<script src=\"/usr/palm/frameworks/mojo/builtins/palmInitFramework" + submission + ".js\"></script>" +
+                "<script src=\"/__lunacy/mojo-boot.js\"></script>";
+            return html.Substring(0, tag.Index) + boot + html.Substring(tag.Index);
         }
 
         // MARK: the fonts, in hand before the page's own scripts run (AppServer.kt, "the fonts")
