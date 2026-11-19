@@ -67,8 +67,12 @@ $zip = [IO.Compression.ZipFile]::OpenRead($Apk)
 $romFiles = 0
 try {
     foreach ($e in $zip.Entries) {
-        if ($e.FullName -notmatch '^assets/rootfs/((usr/palm|etc)/.+)$' -or $e.FullName.EndsWith('/')) { continue }
-        $out = Join-Path $dest ('rootfs\' + ($Matches[1] -replace '/', '\'))
+        if ($e.FullName.EndsWith('/')) { continue }
+        # The ROM's /usr/palm and /etc; and the page frameworks with Lunacy's patches (mojoloader.js
+        # and Palm's libraries, Mojo, mojocommon), served at /usr/palm/frameworks (AppServer.cs).
+        if ($e.FullName -match '^assets/rootfs/((usr/palm|etc)/.+)$') { $out = Join-Path $dest ('rootfs\' + ($Matches[1] -replace '/', '\')) }
+        elseif ($e.FullName -match '^assets/fw/((frameworks|mojo|mojocommon)/.+)$') { $out = Join-Path $dest ('fw\' + ($Matches[1] -replace '/', '\')) }
+        else { continue }
         New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
         [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true)
         $romFiles++

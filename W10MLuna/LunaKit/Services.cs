@@ -275,6 +275,37 @@ namespace LunaKit
                 var a = shell.Apps.Get(c.Params.GetString("appId") ?? c.Params.GetString("id"));
                 c.Reply(a == null ? Bus.Error("Application not found") : "{\"returnValue\":true,\"appInfo\":" + a.Listed().Stringify() + "}");
             });
+            // App Catalog watches this for its install buttons (measured on the reference TouchPad:
+            // subscriptions only, {"returnValue":true,"subscribed":true} first). Installs from the
+            // catalog aren't built yet, so nothing comes or goes after that.
+            bus.Register("com.palm.applicationManager", "launchPointChanges", c =>
+            {
+                if (!c.Subscribe) { c.Reply(J.Obj(J.P("returnValue", false), J.P("subscribed", false), J.P("errorText", "Only supports subscriptions"))); return; }
+                c.Reply(J.Obj(J.P("returnValue", true), J.P("subscribed", true)));
+            });
+            // An app may change only its own launch point's icon: the caller from the bus, never
+            // from the params (Lunacy's rule 10). Calendar draws today's date on its icon.
+            bus.Register("com.palm.applicationManager", "updateLaunchPointIcon", c =>
+            {
+                var id = c.Params.GetString("launchPointId") ?? "";
+                if (id.Length == 0) { c.Reply(Bus.Error("Must provide launchPointId")); return; }
+                if (!c.Params.ContainsKey("icon")) { c.Reply(Bus.Error("Must provide icon path")); return; }
+                var app = id.EndsWith("_default", StringComparison.Ordinal) ? shell.Apps.Get(id.Substring(0, id.Length - 8)) : null;
+                if (app == null) { c.Reply(Bus.Error("Unable to update launch point's icon")); return; }
+                if (app.Id != c.AppId) { c.Reply(Bus.Error("Attempted to change another application's launch point icon")); return; }
+                var icon = (c.Params.GetString("icon") ?? "");
+                if (icon.StartsWith("file://", StringComparison.Ordinal)) icon = icon.Substring(7);
+                var basePath = "/" + AppServer.AppsPath + app.Id + "/";
+                if (icon.StartsWith(basePath, StringComparison.Ordinal)) icon = icon.Substring(basePath.Length);
+                if (icon.StartsWith("/", StringComparison.Ordinal) || icon.Contains("..") || !System.IO.File.Exists(System.IO.Path.Combine(app.Dir, icon.Replace('/', '\\'))))
+                {
+                    c.Reply(Bus.Error("Unable to update launch point's icon"));
+                    return;
+                }
+                app.Icon = icon;
+                shell.Evaluate("__lunacyShell.setIcon(" + J.Str(app.Id) + "," + J.Str(app.Url(icon)) + ")");
+                c.Reply(Bus.Ok());
+            });
             bus.Register("com.palm.applicationManager", "getAppBasePath", c =>
             {
                 var a = shell.Apps.Get(c.Params.GetString("appId"));

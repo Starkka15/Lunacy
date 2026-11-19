@@ -34,6 +34,7 @@ namespace LunaKit
         private static readonly TimeSpan FontWait = TimeSpan.FromSeconds(1);
         private static readonly Regex Slashes = new Regex("/{2,}");
         private static readonly Regex EnyoPath = new Regex("(?:^|/)usr/palm/frameworks/enyo/[^/]+/");
+        private static readonly Regex FrameworksPath = new Regex("(?:^|/)usr/palm/frameworks/");
         private static readonly Regex Head = new Regex("<head[^>]*>", RegexOptions.IgnoreCase);
         private static readonly Regex Doctype = new Regex("^\\s*<!doctype[^>]*>", RegexOptions.IgnoreCase);
 
@@ -95,6 +96,15 @@ namespace LunaKit
             else if (path.StartsWith("__lunacy/luna/", StringComparison.Ordinal)) file = Path.Combine(assets, "luna", path.Substring("__lunacy/luna/".Length));
             else if (path.StartsWith("__lunacy/", StringComparison.Ordinal)) file = Path.Combine(assets, "lunacy", path.Substring("__lunacy/".Length));
             else if ((enyo = EnyoPath.Match(path)).Success) file = Path.Combine(assets, "fw", "enyo", "1.0", path.Substring(enyo.Index + enyo.Length));
+            else if ((enyo = FrameworksPath.Match(path)).Success)
+            {
+                // The rest of /usr/palm/frameworks at their own paths (AndroidLuna's FRAMEWORKS):
+                // mojoloader.js and the libraries it hands out, from webos\fw\frameworks; Mojo and
+                // mojocommon from their own trees.
+                var rest = path.Substring(enyo.Index + enyo.Length);
+                var top = rest.Split('/')[0];
+                file = top == "mojo" || top == "mojocommon" ? Path.Combine(assets, "fw", rest) : Path.Combine(assets, "fw", "frameworks", rest);
+            }
             else if (path.StartsWith(AppsPath, StringComparison.Ordinal))
             {
                 var rest = path.Substring(AppsPath.Length);

@@ -62,6 +62,7 @@
     <Compile Include="Jx.cs" />
     <Compile Include="Db8.cs" />
     <Compile Include="Configurator.cs" />
+    <Compile Include="SystemService.cs" />
     <Compile Include="NetShim.cs" />
     <Compile Include="Services.cs" />
     <Compile Include="Sqlite.cs" />

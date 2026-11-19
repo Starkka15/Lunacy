@@ -16,6 +16,8 @@ namespace LunaKit
         {
             public readonly string AppId, Service, Method;
             public readonly JsonObject Params;
+            /// The payload as sent: some methods take an array (timezone/getTimeZoneRules).
+            public string Raw = "{}";
             private readonly Action<string> send;
             private readonly object gate = new object();
             private List<Action> onCancel = new List<Action>();
@@ -77,7 +79,7 @@ namespace LunaKit
             string service = "", method = "";
             var m = Uri.Match(url ?? "");
             if (m.Success) { service = m.Groups[1].Value; method = m.Groups[2].Value; }
-            var c = new Call(appId, service, method, J.ParseObject(parameters), reply);
+            var c = new Call(appId, service, method, J.ParseObject(parameters), reply) { Raw = string.IsNullOrEmpty(parameters) ? "{}" : parameters };
             Action<Call> h;
             lock (handlers) handlers.TryGetValue(service + "/" + method, out h);
             LunaLog.Write("[LunaKit] bus [" + appId + "] " + service + "/" + method + (h == null ? " UNHANDLED" : ""));

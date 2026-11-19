@@ -560,6 +560,13 @@
 	window.__lunacyShell = {
 		windowOf: windowOf,
 		setZoom: setZoom,
+		// applicationManager/updateLaunchPointIcon: the launcher and dock draw the new icon.
+		setIcon: function (appId, url) {
+			if (!apps[appId]) { return; }
+			apps[appId].icon = url;
+			buildLauncher();
+			buildDock();
+		},
 		setLayoutWidth: setLayoutWidth,
 		open: openWindow,
 		close: function (id) { closeWindow(id); },
