@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The template assemble-assets.ps1 fills from the bundled app's appinfo.json into
+<!-- The template assemble-assets.ps1 fills into
      Package.appxmanifest: @ID@ (the package name), @TITLE@, @VERSION@, @VENDOR@, @PUBLISHER@
      (the signing certificate's subject). -->
 <Package
@@ -32,7 +32,7 @@
         DisplayName="@TITLE@"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png"
-        Description="@TITLE@, a webOS app, on Lunacy"
+        Description="webOS apps on Windows 10 Mobile"
         BackgroundColor="#000000">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" ShortName="@TITLE@" />
         <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#000000" />

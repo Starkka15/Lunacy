@@ -50,13 +50,14 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="AppServer.cs" />
+    <Compile Include="Apps.cs" />
     <Compile Include="Bridge.cs" />
     <Compile Include="Bus.cs" />
     <Compile Include="DeviceProfile.cs" />
     <Compile Include="FixedViewport.cs" />
     <Compile Include="Json.cs" />
     <Compile Include="Log.cs" />
-    <Compile Include="LunaCard.cs" />
+    <Compile Include="LunaShell.cs" />
     <Compile Include="NetShim.cs" />
     <Compile Include="Services.cs" />
     <Compile Include="Sqlite.cs" />

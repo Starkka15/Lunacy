@@ -21,6 +21,9 @@ namespace LunaKit
             "com.palm.app.clock", "com.palm.calculator", "com.palm.app.notes", "com.palm.app.enyo-findapps",
         };
 
+        /// The shell lays each window out itself; it applies this list on a phone.
+        public static IEnumerable<string> DefaultIds { get { return DefaultOn; } }
+
         private static readonly bool Phone =
             AnalyticsInfo.VersionInfo.DeviceFamily == "Windows.Mobile";
 

@@ -1,0 +1,9 @@
+{
+	"id": "org.webosarchive.lunacy.w10mspike",
+	"version": "0.0.1",
+	"vendor": "Lunacy",
+	"type": "web",
+	"main": "index.html",
+	"title": "Frames Spike",
+	"icon": "icon.png"
+}

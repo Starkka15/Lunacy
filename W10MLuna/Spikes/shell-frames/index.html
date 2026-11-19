@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>root</title>
+<!-- W10MLuna's shell spike: can a card's windows live as frames in one WebView? Each result is a
+     console line starting "SPIKE", which the host writes to lunakit.log. -->
+<style>body{background:#222;color:#ddd;font:14px sans-serif} iframe{width:150px;height:80px;border:1px solid #888}</style>
+</head>
+<body>
+<div id="out">Frames spike: results go to lunakit.log.</div>
+<script>
+function log(k, v) { console.log("SPIKE root " + k + " = " + v); }
+log("LunaHost", typeof window.LunaHost);
+log("LunacyNative", typeof window.LunacyNative);
+log("origin", location.protocol + "//" + location.host);
+
+function frame(name, src) {
+	var f = document.createElement("iframe");
+	f.name = name; f.src = src;
+	document.body.appendChild(f);
+	return f;
+}
+
+// T3: values set on a new same-origin frame's window before its page has loaded (how webOS hands
+// a window its parameters). Kept only if EdgeHTML reuses the initial about:blank window.
+var child = frame("child", "frame.html?role=child");
+try {
+	var cw = child.contentWindow;
+	cw.__marker = "set-before-load";
+	cw.windowParams = { hello: 1 };
+	log("child.contentWindow at append", cw ? "present, location " + cw.location.href : "null");
+} catch (e) { log("child.contentWindow at append", "threw " + e.message); }
+
+// T4: a same-origin sibling scripting another (frame.html role=sib reads child's document).
+setTimeout(function () { frame("sib", "frame.html?role=sib"); }, 300);
+
+// T1, T6: frames from another app's origin, and two of them scripting each other under this
+// different-origin parent.
+var other = "";
+try { other = String(LunacyNative.appOrigin("com.example.other")).replace(/\/$/, ""); } catch (e) { log("appOrigin", "threw " + e.message); }
+log("other origin", other);
+if (other) {
+	var p = "/media/cryptofs/apps/usr/palm/applications/org.webosarchive.lunacy.w10mspike/frame.html";
+	frame("xo1", other + p + "?role=xo1");
+	setTimeout(function () { frame("xo2", other + p + "?role=xo2"); }, 300);
+}
+
+// window.open as a page calls it.
+try {
+	var wo = window.open("frame.html?role=popup", "popup", "attributes={}");
+	log("window.open", wo ? "returned a window" : "returned null");
+} catch (e) { log("window.open", "threw " + e.message); }
+
+window.addEventListener("load", function () {
+	try { log("child marker after load", child.contentWindow.__marker + ", params " + typeof child.contentWindow.windowParams); }
+	catch (e) { log("child marker after load", "threw " + e.message); }
+	setTimeout(function () { log("done", "yes"); }, 3000);
+});
+</script>
+</body>
+</html>

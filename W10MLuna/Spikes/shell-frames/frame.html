@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head><title>frame</title></head>
+<body style="background:#335;color:#fff;font:11px sans-serif">
+<script>
+var role = (location.search.match(/role=(\w+)/) || [])[1];
+document.title = "frame-" + role;
+document.body.appendChild(document.createTextNode(role));
+function log(k, v) { console.log("SPIKE " + role + " " + k + " = " + v); }
+function t(k, f) { try { log(k, f()); } catch (e) { log(k, "threw " + (e.name || "") + " " + e.message); } }
+t("origin", function () { return location.protocol + "//" + location.host; });
+t("LunaHost", function () { return typeof window.LunaHost; });
+t("LunacyNative", function () { return typeof window.LunacyNative; });
+t("bridge call", function () { return LunacyNative.appId(); });
+t("marker at start", function () { return window.__marker + ", params " + typeof window.windowParams; });
+t("opener", function () { return window.opener ? "set" : "none"; });
+t("parent document", function () { return parent.document.title; });
+t("localStorage", function () { localStorage.setItem("spike-" + role, "1"); return localStorage.getItem("spike-" + role); });
+t("localStorage shadow", function () {
+	Object.defineProperty(window, "localStorage", { value: { shim: 1 }, configurable: true });
+	return "shim " + localStorage.shim;
+});
+if (role === "sib") t("sibling child document", function () { return parent.frames["child"].document.title; });
+if (role === "xo2") t("sibling xo1 document", function () { return parent.frames["xo1"].document.title; });
+if (role === "xo1") t("parent frames length", function () { return parent.frames.length; });
+</script>
+</body>
+</html>

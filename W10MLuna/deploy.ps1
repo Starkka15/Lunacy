@@ -46,6 +46,7 @@ if ($Pin) {
     if ($r.Code -ne 200) { throw "Pairing failed (HTTP $($r.Code)); get a new code from the phone." }
 }
 $r = Invoke-Portal @("$base/api/os/machinename")
+if ($r.Code -eq 0) { throw "The phone doesn't answer at $($Phone): wake it, or check that it is on Wi-Fi." }
 if ($r.Code -ne 200) { throw "Not paired (HTTP $($r.Code)); run again with -Pin <code from the phone>." }
 Write-Host "Phone: $($r.Body)"
 

@@ -214,35 +214,72 @@ namespace LunaKit
     /// palm://com.palm.applicationManager/open and launch, for what Windows can open: a URL (web,
     /// mail, phone) goes to the system. Launching another webOS app by id needs the shell, which
     /// a W10MLuna card doesn't have yet, and says so.
+    /// com.palm.applicationManager, as LunaSysMgr answered it (AndroidLuna's ApplicationManager.kt):
+    /// launch and open - an app by id (started, or brought forward with the new params), a web
+    /// page to the Web app, mailto: to Email, any other link to Windows - and the app list.
     internal sealed class ApplicationManager
     {
-        private readonly string appId;
-        private readonly CoreDispatcher dispatcher;
-        public ApplicationManager(string appId, CoreDispatcher dispatcher) { this.appId = appId; this.dispatcher = dispatcher; }
+        private const string Browser = "com.palm.app.browser";
+        private const string Email = "com.palm.app.email";
+        private readonly LunaShell shell;
+        public ApplicationManager(LunaShell shell) { this.shell = shell; }
 
         public void Register(Bus bus)
         {
             Action<Bus.Call> h = c =>
             {
+                var id = c.Params.GetString("id") ?? "";
                 var inner = c.Params.ContainsKey("params") && c.Params["params"].ValueType == Windows.Data.Json.JsonValueType.Object
                     ? c.Params.GetNamedObject("params") : null;
-                var target = c.Params.GetString("target") ?? (inner == null ? null : inner.GetString("target"));
-                Uri uri;
-                if (target != null && Uri.TryCreate(target, UriKind.Absolute, out uri))
+                var target = c.Params.GetString("target") ?? "";
+                if (id.Length == 0 && target.Length > 0)
                 {
-                    var _ = dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () =>
+                    // webOS's command-resource-handlers: ^https?: and ^data: to the Web app,
+                    // mailto: to Email, each a card of its own.
+                    var lower = target.ToLowerInvariant();
+                    string app = (lower.StartsWith("http:") || lower.StartsWith("https:") || lower.StartsWith("data:")) ? Browser
+                        : lower.StartsWith("mailto:") ? Email : null;
+                    if (app != null && shell.Apps.Get(app) != null)
                     {
-                        bool ok = await Windows.System.Launcher.LaunchUriAsync(uri);
-                        c.Reply(ok ? Bus.Ok() : Bus.Error("Windows couldn't open " + uri.Scheme + ": links"));
-                    });
+                        shell.Launch(app, J.Obj(J.P("target", target)), c.AppId);
+                        c.Reply(J.Obj(J.P("returnValue", true), J.P("processId", "success")));
+                        return;
+                    }
+                    Uri uri;
+                    if (Uri.TryCreate(target, UriKind.Absolute, out uri) && !uri.IsFile)
+                    {
+                        var _ = shell.Dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () =>
+                        {
+                            bool ok = await Windows.System.Launcher.LaunchUriAsync(uri);
+                            c.Reply(ok ? Bus.Ok() : Bus.Error("Windows couldn't open " + uri.Scheme + ": links"));
+                        });
+                        return;
+                    }
+                    c.Reply(Bus.Error("No handler for " + target));
                     return;
                 }
-                var id = c.Params.GetString("id");
-                if (id == appId) { c.Reply(Bus.Ok()); return; }
-                c.Reply(Bus.Error("W10MLuna can't launch another webOS app yet (" + (id ?? "no target") + ")"));
+                if (shell.Apps.Get(id) == null) { c.Reply(Bus.Error("Application not found: " + id)); return; }
+                // An activity's callback carries "$activity" beside the params, and the
+                // application manager put it into the params the app gets (luna-sysmgr).
+                var p = inner == null ? new Windows.Data.Json.JsonObject() : Windows.Data.Json.JsonObject.Parse(inner.Stringify());
+                if (c.Params.ContainsKey("$activity")) p["$activity"] = c.Params["$activity"];
+                shell.Launch(id, inner == null && !c.Params.ContainsKey("$activity") ? "" : p.Stringify(), c.AppId);
+                c.Reply(J.Obj(J.P("returnValue", true), J.P("processId", "success")));
             };
             bus.Register("com.palm.applicationManager", "open", h);
             bus.Register("com.palm.applicationManager", "launch", h);
+            bus.Register("com.palm.applicationManager", "listApps", c =>
+                c.Reply("{\"returnValue\":true,\"apps\":" + shell.Apps.Json() + "}"));
+            bus.Register("com.palm.applicationManager", "getAppInfo", c =>
+            {
+                var a = shell.Apps.Get(c.Params.GetString("appId") ?? c.Params.GetString("id"));
+                c.Reply(a == null ? Bus.Error("Application not found") : "{\"returnValue\":true,\"appInfo\":" + a.Listed().Stringify() + "}");
+            });
+            bus.Register("com.palm.applicationManager", "getAppBasePath", c =>
+            {
+                var a = shell.Apps.Get(c.Params.GetString("appId"));
+                c.Reply(a == null ? Bus.Error("Application not found") : J.Obj(J.P("returnValue", true), J.P("basePath", "file:///" + AppServer.AppsPath + a.Id + "/" + a.Main)));
+            });
         }
     }
 }
