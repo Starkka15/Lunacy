@@ -121,6 +121,18 @@ foreach ($rel in @('fw\enyo\1.0\framework\build\enyo-build.js', 'fw\enyo\1.0\fra
     if ($u -ne $t) { [IO.File]::WriteAllText($f, $u, (New-Object Text.UTF8Encoding($false))) } else { Write-Warning "assemble-assets: Enyo's makeAbsoluteUrl not found in $rel" }
 }
 
+# Mojo, the same: it finds the app's folder and its host from the page's URL, taking it as
+# file:/// or http(s):// (Mojo._calculateAppRootPath, the hosting prefix, mojo.core's App.path).
+# W10M serves every page from ms-local-stream:, so Mojo.appPath was undefined and the framework
+# threw while starting (SimpleChat). The scheme added beside http(s).
+foreach ($rel in @('fw\mojo\builtins\palmInitFramework506.js', 'fw\mojo\builtins\palmInitFramework2205.js', 'fw\mojo\builtins\palmmojo_coreVersion1_0.js')) {
+    $f = Join-Path $dest $rel
+    if (-not (Test-Path $f)) { continue }
+    $t = [IO.File]::ReadAllText($f)
+    $u = $t.Replace('https?:\/\/', '(?:https?|ms-local-stream):\/\/')
+    if ($u -ne $t) { [IO.File]::WriteAllText($f, $u, (New-Object Text.UTF8Encoding($false))) } else { Write-Warning "assemble-assets: Mojo's URL patterns not found in $rel" }
+}
+
 # The apps, each in a folder named by its id.
 $folders = @(Get-ChildItem (Join-Path $repo 'CoreApps') -Directory | ForEach-Object FullName) + @($App | ForEach-Object { (Resolve-Path $_).Path })
 $ids = @()

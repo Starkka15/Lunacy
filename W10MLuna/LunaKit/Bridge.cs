@@ -32,7 +32,7 @@ namespace LunaKit
         public void Console(int win, string level, string msg) { var w = W(win); if (w != null) w.Log("console." + level, msg); else LunaLog.Write("[window " + win + "] console." + level + " " + msg); }
 
         // The bus.
-        public void BusCall(int win, int token, string url, string parameters) { var w = W(win); if (w != null) w.BusCall(token, url, parameters); }
+        public bool BusCall(int win, int token, string url, string parameters) { var w = W(win); if (w != null) w.BusCall(token, url, parameters); return Bus.StaysOpen(url, parameters); }
         public void BusCancel(int win, int token) { var w = W(win); if (w != null) w.BusCancel(token); }
 
         // The network shim.

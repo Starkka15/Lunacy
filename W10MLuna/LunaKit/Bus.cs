@@ -176,5 +176,16 @@ namespace LunaKit
         }
 
         public static string Ok() { return "{\"returnValue\":true}"; }
+
+        /// Whether a call keeps answering, by its URL and payload, before it is made (Bus.kt's
+        /// staysOpen): "subscribe" or "watch" in the payload, or db8's watch. The pages' bridge
+        /// keeps such a call's callback for the replies after the first.
+        public static bool StaysOpen(string url, string parameters)
+        {
+            var m = Uri.Match(url ?? "");
+            var method = m.Success ? m.Groups[2].Value : "";
+            var p = J.ParseObject(string.IsNullOrEmpty(parameters) ? "{}" : parameters);
+            return p.GetBool("subscribe") || p.GetBool("watch") || method == "watch";
+        }
     }
 }

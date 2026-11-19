@@ -48,7 +48,9 @@
 
 	var N = {
 		// The bus (bridge.js). Replies come back through PalmServiceBridge.__reply.
-		call: function (token, url, params) { H.busCall(W, n(token), s(url), s(params)); },
+		// Whether the call stays open (Bus.StaysOpen), as Android's call answers: bridge.js keeps
+		// a subscription's callback only then, so its later replies reach the page.
+		call: function (token, url, params) { return H.busCall(W, n(token), s(url), s(params)) === true; },
 		cancel: function (token) { H.busCancel(W, n(token)); },
 		log: function (msg) { H.log(W, s(msg)); },
 
