@@ -103,6 +103,20 @@
 	window.open = function (url, name, features) { return Shell.open(W, window, s(url), s(name), s(features)); };
 	if (root) { window.close = function () { Shell.close(W); }; }
 
+	// window.opener, as the shell recorded it: the shell sets it on the frame before its page
+	// loads, but EdgeHTML doesn't keep it through the page's navigation, and Enyo's
+	// getRootWindow then fell through to top, the shell's page: a card of Email's lost its
+	// app's enyo.application (accounts, prefs) and every window its manager.
+	if (root) {
+		var op = null;
+		try { op = Shell.openerOf(W); } catch (e) {}
+		if (op && window.opener !== op) {
+			H.log(W, "opener restored (the page had " + (window.opener ? "another" : "none") + ")");
+			try { Object.defineProperty(window, "opener", { value: op, writable: true, configurable: true }); }
+			catch (e) { try { window.opener = op; } catch (e2) { H.log(W, "opener not set: " + e2.message); } }
+		}
+	}
+
 	// On webOS a card was its own top window; here top is the shell's page. Enyo finds its app's
 	// root window as opener || rootWindow || top, and when the root goes it hands the role on by
 	// setting the new root's rootWindow to null: so an empty rootWindow means this window, never

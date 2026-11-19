@@ -163,7 +163,7 @@
 
 	function appWindows(appId) {
 		var r = [];
-		for (var id in windows) { if (windows[id].appId === appId) { r.push(windows[id]); } }
+		for (var id in windows) { if (windows[id].appId === appId && windows[id].type !== "service") { r.push(windows[id]); } }
 		r.sort(function (a, b) { return a.id - b.id; });
 		return r;
 	}
@@ -564,9 +564,13 @@
 
 	window.__lunacyShell = {
 		windowOf: windowOf,
+		// The window that opened this one, as the shell recorded it (w10m-native.js).
+		openerOf: function (id) { var w = windows[id]; return (w && w.opener) || null; },
 		setZoom: setZoom,
 		// A JS service package's frame (JsServices.cs): hidden, never one of an app's windows.
-		startService: function (name, url) { return makeWindow("service:" + name, "service", url, null, "", {}).id; },
+		// A service frame is its bus name, as its process was on the bus (the window's id names its
+		// WebSQL folder, where a colon is no file name); appWindows leaves it out of the apps'.
+		startService: function (name, url) { return makeWindow(name, "service", url, null, "", {}).id; },
 		stopService: function (id) { closeWindow(id, true); },
 		// applicationManager/updateLaunchPointIcon: the launcher and dock draw the new icon.
 		setIcon: function (appId, url) {
