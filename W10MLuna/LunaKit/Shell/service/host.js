@@ -136,9 +136,12 @@
 		}
 	};
 
+	// The console's own methods, taken now as Android's host.js takes them: Palm's frameworks
+	// make console.log pmloglib's (bootstrap-node.js), and a pmloglib that looked console up at
+	// each call called itself until the stack ran out (the accounts service).
 	var pmloglib = {};
 	["log", "info", "warn", "error", "debug"].forEach(function (level) {
-		pmloglib[level] = function () { console[level].apply(console, arguments); };
+		pmloglib[level] = console[level].bind(console);
 	});
 
 	N.natives.palmbus = { Handle: Handle };
@@ -154,7 +157,10 @@
 		process.argv = ["node", "bootstrap-node.js", "--", "/no-group/not-present", SERVICE_DIR];
 		N.runMain("/usr/palm/services/jsservicelauncher/bootstrap-node.js");
 	} catch (e) {
+		// As a process whose bootstrap threw: it ends, and its callers hear that it went.
 		N.hostLog("error", "service " + SERVICE_DIR + " failed to start: " + (e && e.stack || e));
+		send({ t: "exit", code: 1 });
+		return;
 	}
 	send({ t: "ready" });
 }());

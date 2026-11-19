@@ -109,6 +109,19 @@
 	// app's enyo.application (accounts, prefs) and every window its manager.
 	if (root) {
 		var op = null;
+		// Diagnostic: whether Enyo shared its app's enyo.application with this window.
+		window.addEventListener("load", function () {
+			try {
+				var o = window.opener, e = window.enyo;
+				if (o && e && e.windows) {
+					var oe = null; try { oe = o.enyo; } catch (x) {}
+					H.log(W, "enyo root: opener " + (oe ? "has enyo" : "has no enyo") + ", root is " +
+						(e.windows.getRootWindow() === o ? "opener" : e.windows.getRootWindow() === window ? "self" : "other") +
+						", application " + (oe && e.application === oe.application ? "shared" : "own") +
+						(oe && oe.application ? " (opener's keys: " + Object.keys(oe.application).join(",") + ")" : ""));
+				}
+			} catch (x) { H.log(W, "enyo root check failed: " + x.message); }
+		}, false);
 		try { op = Shell.openerOf(W); } catch (e) {}
 		if (op && window.opener !== op) {
 			H.log(W, "opener restored (the page had " + (window.opener ? "another" : "none") + ")");
