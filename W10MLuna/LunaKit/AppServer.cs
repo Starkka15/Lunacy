@@ -46,6 +46,20 @@ namespace LunaKit
         private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> fonts = new ConcurrentDictionary<string, TaskCompletionSource<bool>>();
         private int tokens;
 
+        /// The webOS tree (WebosFs), for the paths pages read from it: set once the shell has it.
+        public WebosFs Fs;
+        /// Whether a path (no leading slash) is in the tree the server reads from WebosFs.
+        public static bool Readable(string path) { return TreeReadable.Any(pre => path.StartsWith(pre, StringComparison.Ordinal)); }
+        /// A Windows notification's dashboard icon by app (WindowsNotifications.DashboardIcon).
+        public Func<string, byte[]> AndroidIcon;
+        /// `?__lunacy_thumb=160`: a JPEG copy of a picture under /media/internal, its short side about that.
+        public const string ThumbParam = "__lunacy_thumb";
+        private const string Extract = "var/luna/data/extractfs";
+        /// The webOS tree's files pages read by path on a device (AndroidLuna's AppServer
+        /// rootRoute and userRoute): user storage, the Web app's data, the file cache (Email's
+        /// bodies and attachments) and the ROM's package list.
+        private static readonly string[] TreeReadable = { "media/internal/", "var/luna/data/browser/", "var/file-cache/", "usr/palm/ipkgs/" };
+
         /// `assets`: the folder assemble-assets.ps1 filled (lunacy/, fonts/, fw/, shell/, luna/).
         /// `statics`: __LUNACY_STATIC__ for an app id.
         public AppServer(AppRegistry apps, string assets, Func<string, string> statics)
@@ -89,6 +103,35 @@ namespace LunaKit
                 // Enyo's Tellurium hooks read this while starting; the TouchPad answers 200 and nothing.
                 case "usr/palm/frameworks/tellurium/tellurium_config.json":
                     return Bytes(new byte[0]);
+            }
+
+            if (AndroidIcon != null && path.StartsWith("__lunacy/android-icon/", StringComparison.Ordinal) && path.EndsWith(".svg", StringComparison.Ordinal))
+            {
+                var pkg = path.Substring("__lunacy/android-icon/".Length, path.Length - "__lunacy/android-icon/".Length - 4);
+                var svg = await Task.Run(() => AndroidIcon(pkg)).ConfigureAwait(false);
+                if (svg == null) throw new FileNotFoundException(uri.ToString());
+                return Bytes(svg);
+            }
+            if (Fs != null && path.StartsWith(Extract, StringComparison.Ordinal))
+            {
+                // The source's slashes come as %2F: the spec is read from the encoded path.
+                var raw = uri.AbsolutePath.TrimStart('/');
+                var spec = Uri.UnescapeDataString(raw.Length > Extract.Length ? raw.Substring(Extract.Length) : "");
+                var r = await Extractfs.Read(spec, p => { try { return Fs.IsDir(p) ? null : Fs.Read(p); } catch (WebosFs.FsError) { return null; } }).ConfigureAwait(false);
+                if (r == null) { LunaLog.Write("[LunaKit] 404 /" + path); throw new FileNotFoundException(uri.ToString()); }
+                return Bytes(r.Bytes);
+            }
+            if (Fs != null && TreeReadable.Any(pre => path.StartsWith(pre, StringComparison.Ordinal)))
+            {
+                byte[] tree = null;
+                try { tree = await Task.Run(() => Fs.IsDir("/" + path) ? null : Fs.Read("/" + path)).ConfigureAwait(false); }
+                catch (WebosFs.FsError) { }
+                catch (UnauthorizedAccessException) { }
+                string size; int px;
+                if (tree != null && query.TryGetValue(ThumbParam, out size) && int.TryParse(size, out px))
+                    tree = await Images.Thumbnail(tree, Math.Max(16, Math.Min(1024, px))).ConfigureAwait(false);
+                if (tree == null) { LunaLog.Write("[LunaKit] 404 /" + path); throw new FileNotFoundException(uri.ToString()); }
+                return Bytes(Transform(tree, path, resource, null));
             }
 
             string file = null, root = assets, appId = null;

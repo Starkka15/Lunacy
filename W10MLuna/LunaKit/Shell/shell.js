@@ -11,7 +11,16 @@
 
 	var info = JSON.parse(H.shellInfo());
 	var apps = {};
-	info.apps.forEach(function (a) { apps[a.id] = a; });
+	// The apps, and the launch points apps have added (ApplicationManager's addLaunchPoint), each
+	// a launcher entry that launches its app with its params.
+	function takeApps(list, points) {
+		apps = {};
+		list.forEach(function (a) { apps[a.id] = a; });
+		(points || []).forEach(function (p) {
+			apps[p.id] = { id: p.id, title: p.title, icon: p.icon, launchPoint: true, appId: p.appId, params: p.params, removable: p.removable, visible: true };
+		});
+	}
+	takeApps(info.apps, info.launchPoints);
 	var zoomApps = {};
 	(info.zoomApps || []).forEach(function (id) { zoomApps[id] = true; });
 
@@ -30,7 +39,47 @@
 
 	var body = document.body;
 	var cardsEl = $("cards");
-	$("wallpaper").style.backgroundImage = "url(/__lunacy/luna/wallpapers/" + stored("wallpaper", "01.jpg") + ")";
+	// The wallpaper preference (SystemService.cs), drawn by the host once the page is up; the
+	// last one shown until then.
+	function setWallpaper(url, fallback) {
+		var bg = "url(\"" + url + "\"), url(\"" + fallback + "\")";
+		$("wallpaper").style.backgroundImage = bg;
+		store("wallpaper", bg);
+	}
+	$("wallpaper").style.backgroundImage = stored("wallpaper", "url(\"/__lunacy/luna/wallpapers/22.jpg\")");
+
+	// MARK: volumes (AudioService.cs)
+
+	// A UWP app can't set Windows' volume: media scales every app's audio and video, system and
+	// ringtone the shell's own sounds.
+	var volumes = { media: 0.7, system: 0.7, ringtone: 0.8 };
+	function mediaVolume(doc) {
+		try {
+			var els = doc.querySelectorAll("audio, video");
+			for (var i = 0; i < els.length; i++) { els[i].volume = volumes.media; }
+			var frames = doc.querySelectorAll("iframe");
+			for (var j = 0; j < frames.length; j++) { try { mediaVolume(frames[j].contentDocument); } catch (e) {} }
+		} catch (e) {}
+	}
+	// A frame's media takes the volume as it starts playing (play doesn't bubble: captured).
+	function watchMedia(frame) {
+		try {
+			var doc = frame.contentDocument;
+			if (!doc || doc.__lunacyVolume) { return; }
+			doc.__lunacyVolume = true;
+			doc.addEventListener("play", function (e) { try { e.target.volume = volumes.media; } catch (x) {} }, true);
+			doc.addEventListener("loadedmetadata", function (e) { try { e.target.volume = volumes.media; } catch (x) {} }, true);
+			mediaVolume(doc);
+		} catch (e) {}
+	}
+	function setVolumes(v) {
+		volumes = v;
+		for (var id in windows) { if (windows[id].frame) { watchMedia(windows[id].frame); try { mediaVolume(windows[id].frame.contentDocument); } catch (e) {} } }
+	}
+	// The shell's own sounds: feedback at the system volume, alerts and ringtones at theirs.
+	function playSound(url, volume) {
+		try { var a = new Audio(url); a.volume = Math.max(0, Math.min(1, volume)); a.play(); } catch (e) {}
+	}
 
 	// MARK: windows
 
@@ -80,6 +129,7 @@
 		if (type === "card") { box = el("div", "card", cardsEl); el("div", "shield", box); }
 		else if (type === "dashboard") { box = el("div", "dashboard", $("dashboards")); }
 		else if (type === "popupalert") { box = el("div", "popup", $("popups")); }
+		else if (type === "dock") { box = el("div", "dockwin", $("exh-windows")); }
 		else { box = $("hidden"); }
 		win.box = box;
 		var frame = document.createElement("iframe");
@@ -95,7 +145,7 @@
 			cw.__lunacyWindow = id;
 			if (opener) { cw.opener = opener; }
 		} catch (e) { log("window " + id + " not reachable at creation: " + e.message); }
-		frame.addEventListener("load", function () { if (!win.ready) { stageReady(id); } });
+		frame.addEventListener("load", function () { watchMedia(frame); if (!win.ready) { stageReady(id); } });
 		if (type === "card") {
 			box.addEventListener("pointerdown", function (e) { cardPointer(win, e); });
 		}
@@ -192,7 +242,9 @@
 			try { var a = openerWin.document.createElement("a"); a.href = href; href = a.href; } catch (e) {}
 		}
 		var kind = attrs.window === "dashboard" ? "dashboard"
-			: (attrs.window === "popupalert" || attrs.window === "emergency") ? "popupalert" : "card";
+			: (attrs.window === "popupalert" || attrs.window === "emergency") ? "popupalert"
+			// An app's own Exhibition view: the dock's, never a card.
+			: attrs.window === "dockMode" ? "dock" : "card";
 		var win = makeWindow(opener.appId, kind, href, openerWin, name, attrs);
 		if (kind === "card") {
 			// A card an app opens joins its opener's group: next to it (CardLayer).
@@ -201,6 +253,8 @@
 			maximize(win.id);
 		} else if (kind === "dashboard") {
 			updateNotifications();
+		} else if (kind === "dock") {
+			dockWindowOpened(win);
 		}
 		layoutAll();
 		return win.frame.contentWindow;
@@ -208,10 +262,24 @@
 
 	// MARK: launching
 
-	function launch(appId, params, launchedBy) {
+	// `dock`: started for Exhibition (Placement.DOCK): its first window is a dock window, and
+	// a relaunch leaves the card view alone.
+	function launch(appId, params, launchedBy, dock) {
 		var app = apps[appId];
 		if (!app) { log("launch: no app " + appId); return; }
+		if (app.launchPoint) { launch(app.appId, app.params || "", launchedBy, dock); return; }
 		var mine = appWindows(appId);
+		if (mine.length && dock) {
+			var docked = mine.filter(function (w) { return w.type === "dock"; })[0];
+			if (docked) { showDockFace(docked); return; }
+			try { mine[0].frame.contentWindow.__lunacyRelaunch && mine[0].frame.contentWindow.__lunacyRelaunch(params || ""); } catch (e) { log("relaunch failed: " + e.message); }
+			return;
+		}
+		if (dock) {
+			var dwin = makeWindow(appId, app.noWindow ? "hidden" : "dock", app.main + (params ? "?launchParams=" + encodeURIComponent(params) : ""), null, "", {});
+			if (dwin.type === "dock") { dockWindowOpened(dwin); }
+			return;
+		}
 		if (mine.length) {
 			// Running: the root window hears the new params (Mojo.relaunch, which Enyo
 			// defines), and its card comes forward.
@@ -243,6 +311,7 @@
 		var notes = $("notifications").offsetHeight || 0;
 		var cardH = s.h - GESTURE - (maximized ? notesHeightWhenMax() : 0);
 		var step = s.w * CARD_SCALE + CARD_GAP;
+		layoutDock();
 		cards.forEach(function (id, i) {
 			var win = windows[id];
 			if (!win) { return; }
@@ -282,6 +351,8 @@
 	function maximize(id) {
 		var win = windows[id];
 		if (!win || win.type !== "card") { return; }
+		// A card arriving ends Exhibition (SystemUiController::setCardWindowMaximized).
+		if (exhibitionOn) { setExhibition(false); }
 		var old = maximized && windows[maximized];
 		maximized = id;
 		focusIndex = Math.max(0, cards.indexOf(id));
@@ -465,6 +536,15 @@
 				img.onerror = function () { img.onerror = null; img.src = "/__lunacy/luna/images/default-app-icon.png"; };
 				var label = el("div", "label", cell);
 				label.textContent = a.title;
+				// A long press on an installed app or an added launch point offers Delete.
+				if (a.removable) {
+					var pressTimer = null, pressed = false;
+					cell.addEventListener("pointerdown", function () { pressed = false; pressTimer = setTimeout(function () { pressed = true; askDelete(id); }, 700); });
+					["pointerup", "pointercancel", "pointerleave", "pointermove"].forEach(function (ev) {
+						cell.addEventListener(ev, function (e) { if (ev === "pointermove" && Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0) < 4) { return; } clearTimeout(pressTimer); });
+					});
+					cell.addEventListener("click", function (e) { if (pressed) { e.stopImmediatePropagation(); pressed = false; } }, true);
+				}
 				cell.addEventListener("click", function () {
 					cell.classList.add("touched");
 					setTimeout(function () { cell.classList.remove("touched"); }, 3000);
@@ -517,6 +597,23 @@
 		});
 	})();
 
+	// The launcher's Delete, as webOS asked it: the app and its data, or the shortcut.
+	function askDelete(id) {
+		var a = apps[id];
+		if (!a) { return; }
+		var old = $("delete-ask");
+		if (old) { old.parentNode.removeChild(old); }
+		var box = el("div", "", body);
+		box.id = "delete-ask";
+		var text = el("div", "delete-text", box);
+		text.textContent = a.launchPoint ? "Delete the shortcut \u201c" + a.title + "\u201d?" : "Delete " + a.title + "? Its data goes with it.";
+		var row = el("div", "delete-row", box);
+		var yes = el("div", "delete-yes", row); yes.textContent = "Delete";
+		var no = el("div", "delete-no", row); no.textContent = "Cancel";
+		yes.addEventListener("click", function () { box.parentNode.removeChild(box); H.shellEvent("remove", id); });
+		no.addEventListener("click", function () { box.parentNode.removeChild(box); });
+	}
+
 	function openLauncher() { launcherOpen = true; body.classList.add("launcher"); }
 	function closeLauncher() { launcherOpen = false; body.classList.remove("launcher"); }
 
@@ -548,6 +645,7 @@
 	// opens or closes.
 
 	function back() {
+		if (exhibitionOn) { if ($("exh-menu").classList.contains("open")) { closeFaceMenu(); } else { setExhibition(false); } return true; }
 		var n = $("notifications");
 		if (n.classList.contains("open")) { n.classList.remove("open"); layoutAll(); return; }
 		if (launcherOpen) { closeLauncher(); return; }
@@ -559,6 +657,152 @@
 	}
 
 	window.addEventListener("resize", function () { layoutAll(); buildDock(); showPage(pageIndex, true); });
+
+	// MARK: Exhibition (AndroidLuna's ExhibitionController)
+
+	var exhibitionOn = false;
+	var exhibitionApp = null;   // the app on show, or null for the Time face
+	var dockShown = null;       // the dock window on show, or null for the Time face
+	var faces = [];             // [{appId, title, icon}]: the apps switched on in Exhibition
+	var clockTimer = null;
+
+	// An Exhibition window at the TouchPad's dock size: its 1024 x 768 screen less the 28 px
+	// status bar, upright or on its side as the screen is, as large as fits, centred, black
+	// around it (Docs/luna-deltas.md B16). Its apps were written for exactly that window.
+	function layoutDock() {
+		var area = $("exh-windows");
+		var aw = area.offsetWidth || window.innerWidth, ah = area.offsetHeight || (window.innerHeight - 28);
+		var dw = aw > ah ? 1024 : 768, dh = (aw > ah ? 768 : 1024) - 28;
+		var s = Math.min(aw / dw, ah / dh);
+		for (var id in windows) {
+			var w = windows[id];
+			if (w.type !== "dock") { continue; }
+			var b = w.box.style;
+			b.width = Math.round(dw * s) + "px"; b.height = Math.round(dh * s) + "px";
+			b.left = Math.round((aw - dw * s) / 2) + "px"; b.top = Math.round((ah - dh * s) / 2) + "px";
+			w.size = { width: dw, height: dh, scale: (window.devicePixelRatio || 1) * s };
+			var fs = w.frame.style;
+			fs.width = dw + "px"; fs.height = dh + "px"; fs.transform = "scale(" + s + ")";
+		}
+	}
+
+	function dockWindowOpened(win) {
+		// An app's second dock window replaces its first, as LunaSysMgr closed the one running.
+		appWindows(win.appId).forEach(function (w) { if (w.type === "dock" && w !== win) { closeWindow(w.id, true); } });
+		win.box.style.opacity = 0;
+		layoutDock();
+		if (exhibitionOn && win.appId === exhibitionApp) { showDockFace(win); }
+	}
+
+	// Shows a dock window, or the Time face (null), in place of what was showing; the rest stay
+	// running out of sight, and only the one on show has the focus.
+	function showDockFace(win) {
+		dockShown = win;
+		for (var id in windows) {
+			var w = windows[id];
+			if (w.type !== "dock") { continue; }
+			w.box.style.opacity = w === win ? 1 : 0;
+			w.box.style.pointerEvents = w === win ? "" : "none";
+			setActive(w, w === win);
+		}
+		$("exh-time").style.opacity = win ? 0 : 1;
+		$("exh-time").style.pointerEvents = win ? "none" : "";
+	}
+
+	function tick() {
+		var d = new Date();
+		var h = d.getHours(), m = d.getMinutes();
+		var h24 = info.hour24;
+		$("exh-clock").textContent = (h24 ? h : ((h + 11) % 12 + 1)) + ":" + (m < 10 ? "0" : "") + m;
+		$("exh-date").textContent = d.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+	}
+
+	function faceTitle(appId) {
+		if (!appId) { return "Time"; }
+		return apps[appId] ? apps[appId].title : appId;
+	}
+
+	function exhibit(appId) {
+		$("exh-title").textContent = faceTitle(appId);
+		var docked = appWindows(appId).filter(function (w) { return w.type === "dock"; })[0];
+		if (docked) { showDockFace(docked); return; }
+		// The window type by name and dockMode, as DockModeWindowManager::launchApp built them:
+		// apps test both.
+		launch(appId, JSON.stringify({ windowType: "dockModeWindow", dockMode: true }), "", true);
+	}
+
+	// Exhibition on (display/control/setState {"state":"dock"}, Palm's Exhibition app) or off.
+	// Entering again while on takes effect; only leaving is idempotent. `list`: the faces.
+	function setExhibition(on, list) {
+		if (!on && !exhibitionOn) { return; }
+		exhibitionOn = on;
+		if (on) {
+			if (list) { faces = list; }
+			closeLauncher();
+			if (maximized && windows[maximized]) { setActive(windows[maximized], false); }
+			// The face it was last left on, if still switched on; otherwise the Time face.
+			var last = stored("exhibitionDefault", null);
+			exhibitionApp = faces.some(function (x) { return x.appId === last; }) ? last : null;
+			body.classList.add("exhibiting");
+			tick();
+			if (!clockTimer) { clockTimer = setInterval(tick, 1000); }
+			if (exhibitionApp) { showDockFace(null); exhibit(exhibitionApp); }
+			else { showDockFace(null); $("exh-title").textContent = "Time"; }
+		} else {
+			closeFaceMenu();
+			// What was showing is where the next Exhibition opens; webOS closed what it had put
+			// in the dock (DockModeCloseAppsOnExit).
+			store("exhibitionDefault", exhibitionApp);
+			exhibitionApp = null;
+			dockShown = null;
+			for (var id in windows) { if (windows[id].type === "dock") { closeWindow(Number(id)); } }
+			body.classList.remove("exhibiting");
+			if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
+			if (maximized && windows[maximized]) { setActive(windows[maximized], true); }
+			H.shellEvent("exhibition", "off");
+		}
+		layoutAll();
+	}
+
+	function closeFaceMenu() {
+		$("exh-menu").classList.remove("open");
+		$("exh-title").textContent = faceTitle(exhibitionApp);
+	}
+
+	// The title drops down the faces: Time, and every app switched on in Exhibition.
+	function toggleFaceMenu() {
+		var menu = $("exh-menu");
+		if (menu.classList.contains("open")) { closeFaceMenu(); return; }
+		menu.innerHTML = "";
+		var list = [{ appId: null, title: "Time", icon: "/__lunacy/luna/images/dockmode/time-icon-48x48.png" }].concat(faces);
+		list.forEach(function (face) {
+			var item = el("div", "exh-item" + (face.appId === exhibitionApp ? " on" : ""), menu);
+			var img = el("img", "", item); img.src = face.icon;
+			el("span", "", item).textContent = face.title;
+			item.addEventListener("click", function () { chooseFace(face.appId); });
+		});
+		menu.classList.add("open");
+		$("exh-title").textContent = "Choose an App";
+	}
+
+	function chooseFace(appId) {
+		closeFaceMenu();
+		if (appId === exhibitionApp) { return; }
+		exhibitionApp = appId;
+		if (!appId) { showDockFace(null); $("exh-title").textContent = "Time"; }
+		else { exhibit(appId); }
+	}
+
+	$("exh-title").addEventListener("click", toggleFaceMenu);
+	$("exh-done").addEventListener("click", function () { setExhibition(false); });
+	// The swipe up from the bottom edge ends the mode, as the home button does.
+	(function () {
+		var y0 = null;
+		var edge = $("exh-edge");
+		edge.addEventListener("pointerdown", function (e) { y0 = e.clientY; try { edge.setPointerCapture(e.pointerId); } catch (x) {} });
+		edge.addEventListener("pointermove", function (e) { if (y0 !== null && y0 - e.clientY > 40) { y0 = null; setExhibition(false); } });
+		edge.addEventListener("pointerup", function () { y0 = null; });
+	})();
 
 	// MARK: what windows and the host call
 
@@ -587,6 +831,13 @@
 		screenSize: function () { var s = stageSize(); return JSON.stringify({ width: s.w, height: s.h }); },
 		run: run,
 		launch: function (appId, params, by) { launch(appId, params, by); },
+		setWallpaper: setWallpaper,
+		setApps: function (list, points) { takeApps(JSON.parse(list), JSON.parse(points || "[]")); buildLauncher(); buildDock(); },
+		closeApp: function (appId) { appWindows(appId).forEach(function (w) { closeWindow(w.id, true); }); updateMode(); },
+		setExhibition: function (on, list) { setExhibition(Boolean(on), list ? JSON.parse(list) : null); },
+		exhibiting: function () { return exhibitionOn; },
+		setVolumes: setVolumes,
+		playSound: function (url, volume) { playSound(url, volume); },
 		back: back,
 		log: log
 	};

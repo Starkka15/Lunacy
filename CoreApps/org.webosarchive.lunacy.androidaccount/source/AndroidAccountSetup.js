@@ -18,7 +18,7 @@ enyo.kind({
 	},
 	components: [
 		{kind: "Toolbar", pack: "center", className: "enyo-toolbar-light accounts-header", components: [
-			{kind: "Control", content: $L("Android")}
+			{name: "header", kind: "Control", content: $L("Android")}
 		]},
 		{className: "accounts-header-shadow"},
 		{kind: "Scroller", flex: 1, components: [
@@ -43,10 +43,43 @@ enyo.kind({
 			{name: "cancelButton", kind: "Button", className: "accounts-toolbar-btn", caption: $L("Cancel"), onclick: "cancel"}
 		]},
 		{kind: "CrossAppResult"},
+		{name: "status", kind: "PalmService", service: "palm://org.webosarchive.lunacy/", method: "permissions/status", onResponse: "gotStatus"},
 		{name: "request", kind: "PalmService", service: "palm://org.webosarchive.lunacy/", method: "permissions/request", onResponse: "answered"},
 		{name: "list", kind: "PalmService", service: "palm://org.webosarchive.lunacy.androidaccount/", method: "listCalendars", onResponse: "gotCalendars"},
 		{name: "choose", kind: "PalmService", service: "palm://org.webosarchive.lunacy.androidaccount/", method: "chooseCalendar"}
 	],
+
+	/**
+	 * The words that name the system the data comes from, for a host other than Android
+	 * (permissions/status's hostName). The account's id and service stay the Android
+	 * account's, which Contacts, Calendar and the accounts service know it by.
+	 */
+	hosts: {
+		Windows: {
+			name: "Windows",
+			title: "See Windows' contacts and calendars here",
+			text: "Shows what this phone keeps in People and Calendar, from all of its accounts, in Contacts and Calendar. It is a copy for reading: nothing in Lunacy changes it, and nothing is sent anywhere. Removing this account removes the copy.",
+			go: "Show My Windows Data",
+			refused: "Windows doesn't let Lunacy read them. Turn on Contacts or Calendar for Lunacy in Windows' privacy settings, then come back and try once more.",
+			needed: "Lunacy needs permission to read Windows' contacts or calendars to show them here.",
+			settings: "Open Windows Settings"
+		}
+	},
+	host: null,
+	say: function (key, android) {
+		return this.host && this.host[key] ? $L(this.host[key]) : android;
+	},
+
+	gotStatus: function (inSender, r) {
+		this.host = (r && r.returnValue && r.hostName && this.hosts[r.hostName]) || null;
+		if (!this.host) {
+			return;
+		}
+		this.$.header.setContent(this.say("name"));
+		this.$.title.setContent(this.say("title"));
+		this.$.text.setContent(this.say("text"));
+		this.$.goButton.setCaption(this.say("go"));
+	},
 
 	create: function () {
 		this.inherited(arguments);
@@ -54,6 +87,7 @@ enyo.kind({
 		this.calendarItems = [];
 		this.$.title.setContent($L("See Android's contacts and calendars here"));
 		this.$.text.setContent($L("Shows what this device keeps in Android, from all of its accounts, in Contacts and Calendar. It is a copy for reading: nothing in Lunacy changes it, and nothing is sent anywhere. Removing this account removes the copy."));
+		this.$.status.call({});
 		if (p.mode === "modify") {
 			this.$.goButton.hide();
 			this.$.cancelButton.setCaption($L("Done"));
@@ -119,7 +153,7 @@ enyo.kind({
 				template: template,
 				templateId: template && template.templateId,
 				username: "android",
-				alias: $L("Android"),
+				alias: this.say("name", $L("Android")),
 				credentials: {},
 				config: {}
 			});
@@ -128,14 +162,14 @@ enyo.kind({
 		// Once Android won't ask again, only its own screen for Lunacy can give the permission.
 		this.useSettings = Boolean(this.refused);
 		this.$.problem.setContent(this.useSettings ?
-			$L("Android won't ask again. Turn on Contacts or Calendar in Lunacy's permissions, then come back and try once more.") :
-			$L("Lunacy needs permission to read Android's contacts or calendars to show them here."));
+			this.say("refused", $L("Android won't ask again. Turn on Contacts or Calendar in Lunacy's permissions, then come back and try once more.")) :
+			this.say("needed", $L("Lunacy needs permission to read Android's contacts or calendars to show them here.")));
 		this.$.problem.show();
 		if (this.opened) {
 			this.$.goButton.setCaption($L("Try Again"));
 			this.useSettings = false;
 		} else if (this.useSettings) {
-			this.$.goButton.setCaption($L("Open Android Settings"));
+			this.$.goButton.setCaption(this.say("settings", $L("Open Android Settings")));
 		}
 	},
 

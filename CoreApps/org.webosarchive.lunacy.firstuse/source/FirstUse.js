@@ -27,7 +27,7 @@ enyo.kind({
 				{content: $L("Welcome"), className: "title"},
 				{kind: "VFlexBox", className: "contentDefaults box", components: [
 					{content: $L("Lunacy runs webOS apps on this device, the way a TouchPad ran them."), className: "text"},
-					{content: $L("A couple of things need Android's permission before the first app opens. Each is asked for once, here."), className: "text"}
+					{name: "welcomeHost", content: $L("A couple of things need Android's permission before the first app opens. Each is asked for once, here."), className: "text"}
 				]},
 				{kind: "HFlexBox", className: "buttons", pack: "center", components: [
 					{kind: "Button", caption: $L("Next"), className: "enyo-button-affirmative", onclick: "next"}
@@ -53,7 +53,7 @@ enyo.kind({
 				{content: $L("Location"), className: "title"},
 				{kind: "VFlexBox", className: "contentDefaults box", components: [
 					{content: $L("The System menu lists the Wi-Fi networks around you, and webOS apps can ask where you are."), className: "text"},
-					{content: $L("Android shares both with apps allowed to see your location. Each webOS app still asks you first; Location Services sets how."), className: "text"},
+					{name: "locationHost", content: $L("Android shares both with apps allowed to see your location. Each webOS app still asks you first; Location Services sets how."), className: "text"},
 					{name: "locationOk", className: "ok", showing: false},
 					{name: "locationMessage", className: "message", showing: false}
 				]},
@@ -109,8 +109,8 @@ enyo.kind({
 			{name: "notifications", kind: "VFlexBox", className: "page", align: "center", pack: "center", components: [
 				{content: $L("Notifications"), className: "title"},
 				{kind: "VFlexBox", className: "contentDefaults box", components: [
-					{content: $L("Lunacy can show your Android notifications like webOS did: as banners and dashboards."), className: "text"},
-					{content: $L("To use: turn on notification access for Lunacy in Android's settings. Notification data will not be used in any other way."), className: "text"},
+					{name: "notificationsText", content: $L("Lunacy can show your Android notifications like webOS did: as banners and dashboards."), className: "text"},
+					{name: "notificationsHow", content: $L("To use: turn on notification access for Lunacy in Android's settings. Notification data will not be used in any other way."), className: "text"},
 					{name: "notificationsOk", className: "ok", showing: false},
 					{name: "notificationsMessage", className: "message", showing: false}
 				]},
@@ -124,8 +124,8 @@ enyo.kind({
 				{kind: "VFlexBox", className: "contentDefaults box", components: [
 					{content: $L("Lunacy is ready."), className: "text"},
 					{content: $L("The launcher has the apps that come with Lunacy; App Catalog, on its Downloads tab, has the rest."), className: "text"},
-					{content: $L("Anything not allowed here can be allowed later in Android's settings for Lunacy; Android apps' notifications, in Screen & Lock."), className: "text small"},
-					{content: $L("You can add your Android contacts and calendars later in Accounts."), className: "text small"}
+					{name: "doneLater", content: $L("Anything not allowed here can be allowed later in Android's settings for Lunacy; Android apps' notifications, in Screen & Lock."), className: "text small"},
+					{name: "doneAccounts", content: $L("You can add your Android contacts and calendars later in Accounts."), className: "text small"}
 				]},
 				{kind: "HFlexBox", className: "buttons", pack: "center", components: [
 					{kind: "Button", caption: $L("Done"), className: "enyo-button-affirmative", onclick: "finish"}
@@ -148,6 +148,32 @@ enyo.kind({
 		{kind: "PalmService", name: "request", service: "palm://org.webosarchive.lunacy/", method: "permissions/request", onSuccess: "requested", onFailure: "requestFailed"},
 		{kind: "PalmService", name: "finishService", service: "palm://org.webosarchive.lunacy/", method: "firstUse/done", onResponse: "finished"},
 	],
+	/**
+	 * What the pages say on a host other than Android (permissions/status's hostName): its
+	 * own questions and settings. A key left out keeps Android's words, which are the
+	 * components' own.
+	 */
+	hosts: {
+		Windows: {
+			welcomeHost: "A couple of things need Windows' permission before the first app opens. Each is asked for once, here.",
+			locationHost: "Windows shares both with apps allowed to see your location. Each webOS app still asks you first; Location Services sets how.",
+			notificationsText: "Lunacy can show your Windows notifications like webOS did: as banners and dashboards.",
+			notificationsHow: "To use: allow Lunacy to read your notifications when Windows asks. Notification data will not be used in any other way.",
+			notificationsOpen: "Allow",
+			doneLater: "Anything not allowed here can be allowed later in Windows' Settings, under Privacy and Battery saver.",
+			doneAccounts: "You can add your Windows contacts and calendars later in Accounts.",
+			openSettings: "Open Windows Settings",
+			storageRefused: "Not allowed, and Windows won't ask again. Apps won't see your files in /media/internal unless it is allowed in Windows' privacy settings.",
+			locationRefused: "Not allowed, and Windows won't ask again. The System menu can't list Wi-Fi networks, and webOS apps can't find you, unless Location is allowed for Lunacy in Windows' privacy settings.",
+			noAnswer: "Windows didn't answer."
+		}
+	},
+	hostTexts: null,
+	/** The host's words for `key`, or Android's. */
+	say: function(key, android) {
+		var h = this.hostTexts;
+		return h && h[key] ? $L(h[key]) : android;
+	},
 	/** The pages in order, once the status says which apply. */
 	steps: ["welcome", "done"],
 	step: 0,
@@ -159,6 +185,16 @@ enyo.kind({
 	},
 	gotStatus: function(inSender, inResponse) {
 		this.permissions = inResponse;
+		var host = inResponse.hostName && this.hosts[inResponse.hostName];
+		if (host && this.hostTexts !== host) {
+			this.hostTexts = host;
+			for (var k in host) {
+				var c = this.$[k];
+				if (c && c.kind == "Button") { c.setCaption($L(host[k])); }
+				else if (c) { c.setContent($L(host[k])); }
+			}
+			this.$.settingsOpen.setCaption(this.say("openSettings", $L("Open Android Settings")));
+		}
 		var steps = ["welcome"];
 		if (inResponse.storage && inResponse.storage.asked) { steps.push("storage"); }
 		if (inResponse.location && inResponse.location.asked) { steps.push("location"); }
@@ -321,8 +357,8 @@ enyo.kind({
 			if (!inResponse.granted && !inResponse.opened) {
 				if (inResponse.askAgain === false) {
 					this.storageViaSettings = true;
-					this.$.storageAllow.setCaption($L("Open Android Settings"));
-					this.$.storageMessage.setContent($L("Not allowed, and Android won't ask again. Apps won't see your files in /media/internal unless it is allowed under Permissions in Android's settings for Lunacy."));
+					this.$.storageAllow.setCaption(this.say("openSettings", $L("Open Android Settings")));
+					this.$.storageMessage.setContent(this.say("storageRefused", $L("Not allowed, and Android won't ask again. Apps won't see your files in /media/internal unless it is allowed under Permissions in Android's settings for Lunacy.")));
 				} else {
 					this.$.storageMessage.setContent($L("Not allowed. Apps won't see your files in /media/internal until it is allowed."));
 				}
@@ -334,8 +370,8 @@ enyo.kind({
 			if (!inResponse.granted && !inResponse.opened) {
 				if (inResponse.askAgain === false) {
 					this.locationViaSettings = true;
-					this.$.locationAllow.setCaption($L("Open Android Settings"));
-					this.$.locationMessage.setContent($L("Not allowed, and Android won't ask again. The System menu can't list Wi-Fi networks, and webOS apps can't find you, unless Location is allowed in Android's settings."));
+					this.$.locationAllow.setCaption(this.say("openSettings", $L("Open Android Settings")));
+					this.$.locationMessage.setContent(this.say("locationRefused", $L("Not allowed, and Android won't ask again. The System menu can't list Wi-Fi networks, and webOS apps can't find you, unless Location is allowed in Android's settings.")));
 				} else {
 					this.$.locationMessage.setContent($L("Not allowed. The System menu can't list Wi-Fi networks, and webOS apps can't find you, until it is allowed."));
 				}
@@ -350,7 +386,7 @@ enyo.kind({
 		this.$.status.call({});
 	},
 	requestFailed: function(inSender, inResponse) {
-		var text = (inResponse && inResponse.errorText) || $L("Android didn't answer.");
+		var text = (inResponse && inResponse.errorText) || this.say("noAnswer", $L("Android didn't answer."));
 		var which = inSender && inSender.params && inSender.params.permission;
 		var where = which == "systemSettings" ? this.$.settingsMessage : which == "background" ? this.$.backgroundMessage :
 			which == "location" ? this.$.locationMessage : which == "notifications" ? this.$.notificationsMessage : this.$.storageMessage;

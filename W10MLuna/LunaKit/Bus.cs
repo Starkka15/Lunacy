@@ -62,6 +62,42 @@ namespace LunaKit
         public Bus()
         {
             Register("com.palm.bus", "signal/registerServerStatus", ServerStatus);
+            Register("com.palm.bus", "signal/addmatch", AddMatch);
+        }
+
+        /// Open registerServerStatus calls, with the service each watches; open addmatch calls,
+        /// with the category and method each matches (Bus.kt).
+        private readonly List<KeyValuePair<Call, string>> statusWatchers = new List<KeyValuePair<Call, string>>();
+        private readonly List<Tuple<Call, string, string>> signalWatchers = new List<Tuple<Call, string, string>>();
+
+        /// palm://com.palm.bus/signal/addmatch: hear a signal a service sends, by category and,
+        /// optionally, method. Measured on the reference TouchPad: {"returnValue":true} with or
+        /// without subscribe, then the signals; with no category it never answers.
+        private void AddMatch(Call c)
+        {
+            var category = c.Params.GetString("category") ?? "";
+            if (category.Length == 0) return;
+            c.Reply(Ok());
+            var w = Tuple.Create(c, category, c.Params.GetString("method") ?? "");
+            lock (signalWatchers) signalWatchers.Add(w);
+            c.OnCancel(() => { lock (signalWatchers) signalWatchers.Remove(w); });
+        }
+
+        /// Sends a signal to whoever matched it with addmatch.
+        public void Signal(string category, string method, string payload)
+        {
+            Tuple<Call, string, string>[] all;
+            lock (signalWatchers) all = signalWatchers.ToArray();
+            foreach (var w in all) if (w.Item2 == category && (w.Item3.Length == 0 || w.Item3 == method)) w.Item1.Reply(payload);
+        }
+
+        /// A service came or went (a package's JS services do): tell whoever is watching it.
+        private void ServerStatusChanged(string service)
+        {
+            var connected = Has(service);
+            KeyValuePair<Call, string>[] all;
+            lock (statusWatchers) all = statusWatchers.ToArray();
+            foreach (var w in all) if (w.Value == service) w.Key.Reply(J.Obj(J.P("serviceName", service), J.P("connected", connected)));
         }
 
         public void Register(string service, string method, Action<Call> h)
@@ -76,11 +112,13 @@ namespace LunaKit
         public void RegisterService(string service, Action<Call> h)
         {
             lock (handlers) services[service] = h;
+            ServerStatusChanged(service);
         }
 
         public void UnregisterService(string service)
         {
             lock (handlers) services.Remove(service);
+            ServerStatusChanged(service);
         }
 
         public bool Has(string service)
@@ -123,6 +161,13 @@ namespace LunaKit
             var name = c.Params.GetString("serviceName");
             if (string.IsNullOrEmpty(name)) { c.Reply(Error("Invalid payload.")); return; }
             c.Reply(J.Obj(J.P("serviceName", name), J.P("connected", Has(name))));
+            // A subscription answers again when that changes (measured on the reference TouchPad).
+            if (c.Subscribe && !c.Cancelled)
+            {
+                var w = new KeyValuePair<Call, string>(c, name);
+                lock (statusWatchers) statusWatchers.Add(w);
+                c.OnCancel(() => { lock (statusWatchers) statusWatchers.Remove(w); });
+            }
         }
 
         public static string Error(string text, int code = -1)

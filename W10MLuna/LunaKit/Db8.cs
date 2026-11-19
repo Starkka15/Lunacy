@@ -120,6 +120,58 @@ namespace LunaKit
         /// `f` once every operation already asked of this database is done.
         public void After(Action f) { Work(f); }
 
+        /// An account's copy of something kept elsewhere (Db8.kt's syncAccount): `records`, each
+        /// with its remoteId, become `kind`'s objects for the account. A new one is created, a
+        /// changed one has the given properties merged in, and one no longer given is deleted
+        /// (a tombstone, which the contacts linker needs to let a person go). One transaction;
+        /// `done(added, changed, removed)` on db8's thread.
+        public void SyncAccount(string kind, string accountId, List<JObj> records, Action<int, int, int> done = null)
+        {
+            Work(() =>
+            {
+                try
+                {
+                    var have = new Dictionary<string, JObj>();
+                    foreach (var o in Objects(kind).Values)
+                        if (!o.Bool("_del") && o.Str("accountId") == accountId) have[o.Str("remoteId")] = o;
+                    var wanted = new HashSet<string>(records.Select(r => r.Str("remoteId")));
+                    var gone = have.Where(kv => !wanted.Contains(kv.Key)).Select(kv => kv.Value).ToList();
+                    int added = 0, updated = 0;
+                    Transaction(() =>
+                    {
+                        foreach (var old in gone) DelOne(old, false);
+                        foreach (var r in records)
+                        {
+                            r.Put("accountId", accountId);
+                            JObj old;
+                            if (!have.TryGetValue(r.Str("remoteId"), out old))
+                            {
+                                var o = r.Copy().Put("_kind", kind).Put("_rev", NextRev());
+                                if (o.Str("_id").Length == 0) o.Put("_id", NewId());
+                                // An _id this account gave before, on an object deleted since: the new one takes its place.
+                                var dead = ById(o.Str("_id"));
+                                Write(dead, o);
+                                added++;
+                            }
+                            else if (!r.Keys.All(k => old.Has(k) && Identical(old[k], r[k])))
+                            {
+                                var o = old.Copy();
+                                foreach (var k in r.Keys) o.Put(k, Jx.Clone(r[k]));
+                                o.Put("_rev", NextRev());
+                                Write(old, o);
+                                updated++;
+                            }
+                        }
+                    });
+                    if (done != null) done(added, updated, gone.Count);
+                }
+                catch (Exception e)
+                {
+                    LunaLog.Write("[db8] " + service + ": syncAccount " + kind + " for account " + accountId + " failed and was rolled back: " + e.Message);
+                }
+            });
+        }
+
         private void Handle(string method, Bus.Call call)
         {
             string reply;

@@ -72,6 +72,14 @@
     <Compile Include="Sqlite.cs" />
     <Compile Include="Transforms.cs" />
     <Compile Include="WebSql.cs" />
+    <Compile Include="UserFiles.cs" />
+    <Compile Include="Images.cs" />
+    <Compile Include="Background.cs" />
+    <Compile Include="WindowsNotifications.cs" />
+    <Compile Include="Services2.cs" />
+    <Compile Include="Services3.cs" />
+    <Compile Include="AppManager.cs" />
+    <Compile Include="WindowsAccount.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

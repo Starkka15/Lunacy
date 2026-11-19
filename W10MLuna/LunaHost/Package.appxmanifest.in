@@ -6,7 +6,8 @@
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  IgnorableNamespaces="uap mp">
+  xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
+  IgnorableNamespaces="uap uap3 mp">
 
   <Identity Name="@ID@" Publisher="@PUBLISHER@" Version="@VERSION@" />
 
@@ -37,11 +38,62 @@
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" ShortName="@TITLE@" />
         <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#000000" />
       </uap:VisualElements>
+      <Extensions>
+        <!-- In-process: Background.cs registers with no TaskEntryPoint, so App.OnBackgroundActivated
+             runs them (the validator still wants an EntryPoint here). It wakes the activity manager and
+             com.palm.power timeouts while Lunacy is not in front (Background.cs). -->
+        <Extension Category="windows.backgroundTasks" EntryPoint="LunaHost.App">
+          <BackgroundTasks>
+            <Task Type="timer" />
+            <Task Type="systemEvent" />
+          </BackgroundTasks>
+        </Extension>
+        <!-- The Documents library is /media/internal/documents (UserFiles.cs); Windows lets an
+             app into it only for the file types it declares: the ones webOS apps open. -->
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="webosdocuments">
+            <uap:DisplayName>webOS documents</uap:DisplayName>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.pdf</uap:FileType>
+              <uap:FileType>.txt</uap:FileType>
+              <uap:FileType>.doc</uap:FileType>
+              <uap:FileType>.docx</uap:FileType>
+              <uap:FileType>.xls</uap:FileType>
+              <uap:FileType>.xlsx</uap:FileType>
+              <uap:FileType>.ppt</uap:FileType>
+              <uap:FileType>.pptx</uap:FileType>
+              <uap:FileType>.odt</uap:FileType>
+              <uap:FileType>.ods</uap:FileType>
+              <uap:FileType>.odp</uap:FileType>
+              <uap:FileType>.rtf</uap:FileType>
+              <uap:FileType>.epub</uap:FileType>
+              <uap:FileType>.cbz</uap:FileType>
+              <uap:FileType>.cbr</uap:FileType>
+              <uap:FileType>.html</uap:FileType>
+              <uap:FileType>.htm</uap:FileType>
+              <uap:FileType>.csv</uap:FileType>
+              <uap:FileType>.json</uap:FileType>
+              <uap:FileType>.xml</uap:FileType>
+              <uap:FileType>.ipk</uap:FileType>
+              <uap:FileType>.zip</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
     </Application>
   </Applications>
 
   <Capabilities>
     <Capability Name="internetClient" />
     <Capability Name="privateNetworkClientServer" />
+    <uap:Capability Name="picturesLibrary" />
+    <uap:Capability Name="musicLibrary" />
+    <uap:Capability Name="videosLibrary" />
+    <uap:Capability Name="documentsLibrary" />
+    <uap:Capability Name="removableStorage" />
+    <uap:Capability Name="contacts" />
+    <uap:Capability Name="appointments" />
+    <uap3:Capability Name="userNotificationListener" />
+    <DeviceCapability Name="location" />
   </Capabilities>
 </Package>

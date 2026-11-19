@@ -19,6 +19,8 @@ namespace LunaKit
     {
         private readonly string writable, rom;
         private readonly AppRegistry apps;
+        /// The phone's libraries under /media/internal (UserFiles.cs); null until they are found.
+        public UserFiles User;
         private const string AppsDir = "/media/cryptofs/apps/usr/palm/applications/";
 
         public WebosFs(string writable, string rom, AppRegistry apps)
@@ -103,8 +105,24 @@ namespace LunaKit
 
         // ---- operations ----
 
+        /// A path into one of the phone's libraries: the library and the path inside it.
+        private bool Lib(string p, out Windows.Storage.StorageFolder lib, out string rest)
+        {
+            lib = null; rest = null;
+            return User != null && User.InLibrary(p, out lib, out rest);
+        }
+
+        private Windows.Storage.IStorageItem LibMust(Windows.Storage.StorageFolder lib, string rest, string p)
+        {
+            var item = UserFiles.Item(lib, rest);
+            if (item == null) throw new FsError("ENOENT", "ENOENT: no such file or directory, '" + Normal(p) + "'");
+            return item;
+        }
+
         public JObj Stat(string p)
         {
+            Windows.Storage.StorageFolder lib; string rest;
+            if (Lib(p, out lib, out rest)) return UserFiles.Stat(LibMust(lib, rest, p));
             var f = Must(p);
             bool dir = Directory.Exists(f);
             var info = dir ? (FileSystemInfo)new DirectoryInfo(f) : new FileInfo(f);
@@ -114,10 +132,26 @@ namespace LunaKit
                 .Put("mode", dir ? 0x41ED : 0x81A4).Put("dir", dir);
         }
 
-        public bool Exists(string p) { return Find(p) != null; }
+        public bool Exists(string p)
+        {
+            Windows.Storage.StorageFolder lib; string rest;
+            if (Lib(p, out lib, out rest)) return UserFiles.Item(lib, rest) != null;
+            return Find(p) != null;
+        }
+
+        /// Whether a path is a folder, wherever it is.
+        public bool IsDir(string p) { return Exists(p) && Stat(p).Bool("dir"); }
 
         public byte[] Read(string p)
         {
+            Windows.Storage.StorageFolder lib; string rest;
+            if (Lib(p, out lib, out rest))
+            {
+                var item = LibMust(lib, rest, p);
+                var file = item as Windows.Storage.StorageFile;
+                if (file == null) throw new FsError("EISDIR", "EISDIR: illegal operation on a directory, read");
+                return UserFiles.Read(file);
+            }
             var f = Must(p);
             if (Directory.Exists(f)) throw new FsError("EISDIR", "EISDIR: illegal operation on a directory, read");
             using (var s = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
@@ -132,6 +166,8 @@ namespace LunaKit
         public void Write(string p, byte[] data, bool append)
         {
             var np = Normal(p);
+            Windows.Storage.StorageFolder lib; string rest;
+            if (Lib(np, out lib, out rest)) { UserFiles.Write(lib, rest, np, data, append); return; }
             var w = ForWrite(np);
             if (Directory.Exists(w)) throw new FsError("EISDIR", "EISDIR: illegal operation on a directory, open '" + np + "'");
             if (append && !File.Exists(w))
@@ -143,11 +179,36 @@ namespace LunaKit
                 s.Write(data, 0, data.Length);
         }
 
+        /// A file opened for writing from the start, for what arrives in pieces (a download).
+        public Stream OpenWrite(string p)
+        {
+            var np = Normal(p);
+            Windows.Storage.StorageFolder lib; string rest;
+            if (Lib(np, out lib, out rest))
+            {
+                UserFiles.Write(lib, rest, np, new byte[0], false);
+                var f = LibMust(lib, rest, np) as Windows.Storage.StorageFile;
+                return f.OpenStreamForWriteAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+            }
+            var w = ForWrite(np);
+            if (Directory.Exists(w)) throw new FsError("EISDIR", "EISDIR: illegal operation on a directory, open '" + np + "'");
+            return new FileStream(w, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+        }
+
         public List<string> List(string p)
         {
             var np = Normal(p);
+            Windows.Storage.StorageFolder lib; string rest;
+            if (Lib(np, out lib, out rest))
+            {
+                var dir = LibMust(lib, rest, np) as Windows.Storage.StorageFolder;
+                if (dir == null) throw new FsError("ENOTDIR", "ENOTDIR: not a directory, scandir '" + np + "'");
+                return UserFiles.List(dir);
+            }
             var names = new SortedSet<string>(StringComparer.Ordinal);
             bool any = false;
+            // /media/internal lists the libraries mapped into it beside its own folders.
+            if (np == UserFiles.Root && User != null) foreach (var m in User.Mapped) names.Add(m.Key);
             foreach (var dir in new[] { InWritable(np), InApps(np), InRom(np) })
             {
                 if (dir == null) continue;
@@ -165,6 +226,13 @@ namespace LunaKit
         public void MakeDir(string p, bool recursive)
         {
             var np = Normal(p);
+            Windows.Storage.StorageFolder lib; string rest;
+            if (Lib(np, out lib, out rest))
+            {
+                if (rest.Length == 0) { if (recursive) return; throw new FsError("EEXIST", "EEXIST: file already exists, mkdir '" + np + "'"); }
+                UserFiles.MakeDir(lib, rest, np, recursive);
+                return;
+            }
             if (Find(np) != null)
             {
                 if (recursive) return;
@@ -177,6 +245,16 @@ namespace LunaKit
         public void Remove(string p, bool dir, bool recursive)
         {
             var np = Normal(p);
+            Windows.Storage.StorageFolder lib; string rest;
+            if (Lib(np, out lib, out rest))
+            {
+                // The library itself can't go, as /media/internal's own folders couldn't on a device.
+                if (rest.Length == 0) throw new FsError("EBUSY", "EBUSY: resource busy or locked, '" + np + "'");
+                var item = UserFiles.Item(lib, rest);
+                if (item == null) { if (recursive) return; throw new FsError("ENOENT", "ENOENT: no such file or directory, '" + np + "'"); }
+                UserFiles.Remove(item, np, dir, recursive);
+                return;
+            }
             var w = InWritable(np);
             bool here = File.Exists(w) || Directory.Exists(w);
             if (!here)
@@ -200,6 +278,21 @@ namespace LunaKit
         public void Rename(string from, string to)
         {
             var nf = Normal(from); var nt = Normal(to);
+            Windows.Storage.StorageFolder libF, libT; string restF, restT;
+            bool inF = Lib(nf, out libF, out restF), inT = Lib(nt, out libT, out restT);
+            if (inF || inT)
+            {
+                if (inF && inT && libF == libT && restF.Length > 0 && restT.Length > 0)
+                {
+                    UserFiles.Rename(LibMust(libF, restF, nf), libT, restT, nt);
+                    return;
+                }
+                // Between Lunacy's tree and a library, or two libraries: a copy, then the original goes.
+                if (IsDir(nf)) throw new FsError("EXDEV", "EXDEV: cross-device link not permitted, rename '" + nf + "' -> '" + nt + "'");
+                Write(nt, Read(nf), false);
+                Remove(nf, false, false);
+                return;
+            }
             var src = InWritable(nf);
             if (!File.Exists(src) && !Directory.Exists(src))
             {
@@ -229,8 +322,8 @@ namespace LunaKit
         public void CopyTree(string from, string to)
         {
             var nf = Normal(from);
-            var f = Must(nf);
-            if (!Directory.Exists(f)) { Copy(nf, to); return; }
+            if (!Exists(nf)) throw new FsError("ENOENT", "ENOENT: no such file or directory, '" + nf + "'");
+            if (!IsDir(nf)) { Copy(nf, to); return; }
             MakeDir(to, true);
             foreach (var n in List(nf)) CopyTree(nf + "/" + n, Normal(to) + "/" + n);
         }

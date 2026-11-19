@@ -19,5 +19,23 @@ namespace LunaHost
             if (frame.Content == null) frame.Navigate(typeof(MainPage), e.Arguments);
             Window.Current.Activate();
         }
+
+        /// A file Windows opened Lunacy with (the manifest's file types): the shell opens it in a
+        /// webOS app, starting first if it isn't running.
+        protected override void OnFileActivated(FileActivatedEventArgs args)
+        {
+            LunaKit.LunaShell.FilesActivated(args.Files);
+            var frame = Window.Current.Content as Frame;
+            if (frame == null) { frame = new Frame(); Window.Current.Content = frame; }
+            if (frame.Content == null) frame.Navigate(typeof(MainPage), "");
+            Window.Current.Activate();
+        }
+
+        /// The in-process background tasks (LunaKit's Background.cs): a timer or network wake.
+        protected override void OnBackgroundActivated(BackgroundActivatedEventArgs args)
+        {
+            base.OnBackgroundActivated(args);
+            LunaKit.Background.Activated(args.TaskInstance);
+        }
     }
 }

@@ -101,7 +101,7 @@ namespace LunaKit
             // public bus did: the package's own names, the shell's own calls and the activity manager's
             // callbacks (on webOS's private bus) are inside.
             bool outside = !(p.Names.Contains(call.AppId) || call.AppId.StartsWith(Path.GetFileName(p.Dir) + ".", StringComparison.Ordinal)
-                || call.AppId == Db8.Configurator || call.AppId == ActivityManager.Service);
+                || call.AppId == Db8.Configurator || call.AppId == ActivityManager.Service || call.AppId == LunaShell.SystemCaller || call.AppId == PowerService.Service);
             var msg = new JObj().Put("t", "request").Put("id", id).Put("service", service).Put("category", category).Put("method", method)
                 .Put("payload", call.Raw).Put("sender", call.AppId).Put("outside", outside).Put("subscribe", call.Subscribe);
             if (names.ContainsKey(call.AppId)) msg.Put("fromService", true);

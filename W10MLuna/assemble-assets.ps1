@@ -54,7 +54,7 @@ foreach ($f in 'input.js', 'engine.js', 'media.js', 'layout.js', 'bridge.js', 'c
 }
 Copy-Item (Join-Path $here 'LunaKit\JS\w10m-native.js') (Join-Path $dest 'lunacy\w10m-native.js')
 Copy-Item -Recurse (Join-Path $here 'LunaKit\Shell') (Join-Path $dest 'shell')
-foreach ($d in 'images', 'wallpapers') { Copy-Item -Recurse (Join-Path $assets "luna\$d") (Join-Path $dest "luna\$d") }
+foreach ($d in 'images', 'wallpapers', 'sounds', 'ringtones') { Copy-Item -Recurse (Join-Path $assets "luna\$d") (Join-Path $dest "luna\$d") }
 Copy-Item (Join-Path $assets 'luna\*.json') (Join-Path $dest 'luna')
 Copy-Item -Recurse (Join-Path $assets 'luna\fonts') (Join-Path $dest 'fonts')
 New-Item -ItemType Directory -Force (Join-Path $dest 'fw\enyo') | Out-Null

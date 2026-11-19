@@ -1040,40 +1040,475 @@
 	});
 
 	// ---- child_process ----
-	// No processes on W10M. A command is "not found", as a shell said of one it hadn't got
-	// (AndroidLuna's curl.js is the one the ROM's services run; it comes later).
+	// No processes on W10M: the commands webOS's services run are done here, in the service's
+	// own frame - curl (AndroidLuna's curl.js, over this shim's http), and the file commands
+	// (rm, mv, cp, mkdir) over its fs - with exit codes and output as the real ones gave.
+	// initctl and rdx_reporter, which told upstart and the crash reporter, answer success.
+	// Anything else is "not found", as a shell said of a command it hadn't got.
 
-	function notFound(file) {
-		hostLog("warn", "child_process: " + file + " isn't available on W10M");
+	var commands = {};
+
+	// A shell command line, as sh read the ones services build: words with '' and "" quotes,
+	// ; && || between commands, > >> 2> 2>&1 redirections.
+	function parseLine(line) {
+		var out = [], cmd = { argv: [], redirects: [] }, word = null, i = 0, s = String(line);
+		function endWord() { if (word !== null) { cmd.argv.push(word); word = null; } }
+		function endCmd(op) { endWord(); if (cmd.argv.length) { cmd.op = op; out.push(cmd); } cmd = { argv: [], redirects: [] }; }
+		while (i < s.length) {
+			var c = s.charAt(i);
+			if (c === "'") { var j = s.indexOf("'", i + 1); if (j < 0) { j = s.length; } word = (word || "") + s.slice(i + 1, j); i = j + 1; continue; }
+			if (c === "\"") {
+				var v = ""; i++;
+				while (i < s.length && s.charAt(i) !== "\"") { if (s.charAt(i) === "\\" && i + 1 < s.length && /["\\$`]/.test(s.charAt(i + 1))) { i++; } v += s.charAt(i); i++; }
+				word = (word || "") + v; i++; continue;
+			}
+			if (c === "\\" && i + 1 < s.length) { word = (word || "") + s.charAt(i + 1); i += 2; continue; }
+			if (/\s/.test(c)) { endWord(); i++; continue; }
+			if (s.substr(i, 2) === "&&") { endCmd("&&"); i += 2; continue; }
+			if (s.substr(i, 2) === "||") { endCmd("||"); i += 2; continue; }
+			if (c === ";" || c === "\n") { endCmd(";"); i++; continue; }
+			var m = /^(\d?)(>>|>&|>)/.exec(s.slice(i));
+			if (m && word === null) {
+				i += m[0].length;
+				while (/\s/.test(s.charAt(i))) { i++; }
+				var t = /^[^\s;&|]+/.exec(s.slice(i)); t = t ? t[0].replace(/^['"]|['"]$/g, "") : "";
+				i += t.length;
+				cmd.redirects.push({ fd: m[1] === "2" ? 2 : 1, append: m[2] === ">>", dup: m[2] === ">&", target: t });
+				continue;
+			}
+			word = (word || "") + c; i++;
+		}
+		endCmd(";");
+		return out;
+	}
+
+	// Runs one command: io.out(Buffer|string), io.err(string), done(code).
+	function runCommand(argv, io, done) {
+		var name = String(argv[0] || "").replace(/^.*\//, "");
+		var f = commands[name];
+		if (!f) { io.err("sh: " + argv[0] + ": not found\n"); hostLog("warn", "child_process: " + argv[0] + " isn't available on W10M"); return setImmediate(function () { done(127); }); }
+		try { f(argv.slice(1), io, function (code) { done(code || 0); }); }
+		catch (e) { io.err(name + ": " + (e && e.message || e) + "\n"); setImmediate(function () { done(1); }); }
+	}
+
+	// A command line with its redirections and && || ;.
+	function runLine(line, io, done) {
+		var list = parseLine(line), status = 0;
+		(function next(k, skip) {
+			if (k >= list.length) { return done(status); }
+			var c = list[k];
+			if (skip) { return next(k + 1, (c.op === "&&" && status !== 0) || (c.op === "||" && status === 0)); }
+			var sub = { out: io.out, err: io.err };
+			c.redirects.forEach(function (r) {
+				var sink;
+				if (r.dup) { sink = r.target === "1" ? io.out : io.err; }
+				else if (r.target === "/dev/null") { sink = function () {}; }
+				else {
+					var p = r.target, first = !r.append;
+					sink = function (d) { if (first) { fs.writeFileSync(p, d); first = false; } else { fs.appendFileSync(p, d); } };
+					if (!r.append) { fs.writeFileSync(p, ""); first = false; }
+				}
+				if (r.fd === 2) { sub.err = sink; } else { sub.out = sink; }
+			});
+			runCommand(c.argv, sub, function (code) {
+				status = code;
+				next(k + 1, (c.op === "&&" && code !== 0) || (c.op === "||" && code === 0));
+			});
+		})(0, false);
+	}
+
+	function childFor(run) {
 		var child = new EventEmitter();
 		child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
-		child.pid = 0; child.killed = false;
+		child.pid = 4000 + Math.floor(Math.random() * 1000); child.killed = false; child.exitCode = null;
 		child.kill = function () { child.killed = true; };
 		setImmediate(function () {
-			child.stderr.end("sh: " + file + ": not found\n");
-			child.stdout.end();
-			setImmediate(function () { child.emit("exit", 127, null); child.emit("close", 127, null); });
+			run({ out: function (d) { if (!child.killed) { child.stdout.write(typeof d === "string" ? new Buffer(d) : d); } },
+				err: function (d) { if (!child.killed) { child.stderr.write(new Buffer(String(d))); } } },
+				function (code) {
+					child.exitCode = child.killed ? null : code;
+					child.stdout.end(); child.stderr.end();
+					setImmediate(function () {
+						child.emit("exit", child.killed ? null : code, child.killed ? "SIGTERM" : null);
+						child.emit("close", child.killed ? null : code, child.killed ? "SIGTERM" : null);
+					});
+				});
 		});
 		return child;
 	}
+
+	// exec and execFile: the output gathered for the callback, a timeout ending it.
+	function gathered(child, label, opts, cb) {
+		if (!cb) { return child; }
+		var out = [], err = [], timer = null, timedOut = false;
+		child.stdout.on("data", function (d) { out.push(d); });
+		child.stderr.on("data", function (d) { err.push(d); });
+		if (opts && opts.timeout) { timer = setTimeout(function () { timedOut = true; child.kill(); }, opts.timeout); }
+		child.on("close", function (code) {
+			if (timer) { clearTimeout(timer); }
+			var enc = opts && opts.encoding === "buffer";
+			var o = Buffer.concat(out), e = Buffer.concat(err);
+			var so = enc ? o : o.toString(), se = enc ? e : e.toString();
+			if (code === 0 && !timedOut) { return cb(null, so, se); }
+			var x = new Error("Command failed: " + label + "\n" + e.toString());
+			x.code = timedOut ? null : code; x.killed = timedOut; x.signal = timedOut ? "SIGTERM" : null; x.cmd = label;
+			cb(x, so, se);
+		});
+		return child;
+	}
+
 	var child_process = {
-		spawn: function (file) { return notFound(file); },
+		spawn: function (file, args, opts) {
+			var argv = [file].concat(Array.isArray(args) ? args : []);
+			if (opts && opts.shell && !Array.isArray(args)) { return childFor(function (io, done) { runLine(file, io, done); }); }
+			return childFor(function (io, done) { runCommand(argv, io, done); });
+		},
 		execFile: function (file, args, opts, cb) {
 			cb = [args, opts, cb].filter(function (x) { return typeof x === "function"; })[0];
-			var c = notFound(file);
-			if (cb) { c.on("exit", function (code) { var e = new Error("Command failed: " + file + "\nsh: " + file + ": not found"); e.code = code; cb(e, "", "sh: " + file + ": not found\n"); }); }
-			return c;
+			var a = Array.isArray(args) ? args : [];
+			var o = [args, opts].filter(function (x) { return x && typeof x === "object" && !Array.isArray(x); })[0] || {};
+			return gathered(childFor(function (io, done) { runCommand([file].concat(a), io, done); }), [file].concat(a).join(" "), o, cb);
 		},
 		exec: function (cmd, opts, cb) {
-			if (typeof opts === "function") { cb = opts; }
-			var word = String(cmd).trim().split(/\s+/)[0];
-			var c = notFound(word);
-			if (cb) { c.on("exit", function (code) { var e = new Error("Command failed: " + cmd + "\nsh: " + word + ": not found"); e.code = code; cb(e, "", "sh: " + word + ": not found\n"); }); }
-			return c;
+			if (typeof opts === "function") { cb = opts; opts = {}; }
+			return gathered(childFor(function (io, done) { runLine(cmd, io, done); }), cmd, opts || {}, cb);
 		},
-		spawnSync: function (file) { return { pid: 0, status: 127, signal: null, stdout: new Buffer(0), stderr: new Buffer("sh: " + file + ": not found\n"), output: [] }; },
-		execSync: function (cmd) { var e = new Error("Command failed: " + cmd); e.status = 127; throw e; },
-		execFileSync: function (file) { var e = new Error("Command failed: " + file); e.status = 127; throw e; }
+		// The file commands run at once; curl, which waits on the network, can't answer synchronously.
+		spawnSync: function (file, args) {
+			var r = syncRun([file].concat(Array.isArray(args) ? args : []));
+			return { pid: 0, status: r.code, signal: null, stdout: r.out, stderr: r.err, output: [null, r.out, r.err] };
+		},
+		execSync: function (cmd, opts) {
+			var list = parseLine(cmd), r = { code: 0, out: new Buffer(0), err: new Buffer(0) };
+			for (var k = 0; k < list.length; k++) { r = syncRun(list[k].argv); if (r.code !== 0 && list[k].op !== ";") { break; } }
+			if (r.code !== 0) { var e = new Error("Command failed: " + cmd + "\n" + r.err.toString()); e.status = r.code; e.stdout = r.out; e.stderr = r.err; throw e; }
+			return opts && opts.encoding && opts.encoding !== "buffer" ? r.out.toString() : r.out;
+		},
+		execFileSync: function (file, args, opts) {
+			var r = syncRun([file].concat(Array.isArray(args) ? args : []));
+			if (r.code !== 0) { var e = new Error("Command failed: " + file + "\n" + r.err.toString()); e.status = r.code; e.stdout = r.out; e.stderr = r.err; throw e; }
+			return opts && opts.encoding && opts.encoding !== "buffer" ? r.out.toString() : r.out;
+		}
+	};
+
+	function syncRun(argv) {
+		var name = String(argv[0] || "").replace(/^.*\//, ""), out = [], err = [], code = null;
+		if (name === "curl" || !commands[name]) {
+			return { code: 127, out: new Buffer(0), err: new Buffer("sh: " + argv[0] + ": " + (name === "curl" ? "can't run synchronously on W10M" : "not found") + "\n") };
+		}
+		commands[name](argv.slice(1), { out: function (d) { out.push(new Buffer(d)); }, err: function (d) { err.push(new Buffer(String(d))); } }, function (c) { code = c || 0; }, true);
+		return { code: code === null ? 0 : code, out: Buffer.concat(out), err: Buffer.concat(err) };
+	}
+
+	// ---- the file commands ----
+
+	function flags(args, known) {
+		var f = {}, rest = [];
+		args.forEach(function (a) {
+			if (/^-[A-Za-z]+$/.test(a) && rest.length === 0 || /^-[A-Za-z]+$/.test(a)) { a.slice(1).split("").forEach(function (c) { f[c] = true; }); }
+			else if (a === "--") { return; }
+			else { rest.push(a); }
+		});
+		return { f: f, args: rest };
+	}
+	function isDir(p) { try { return fs.statSync(p).isDirectory(); } catch (e) { return false; } }
+	function exists(p) { try { fs.statSync(p); return true; } catch (e) { return false; } }
+	function removeTree(p) {
+		if (isDir(p)) { fs.readdirSync(p).forEach(function (n) { removeTree(p + "/" + n); }); fs.rmdirSync(p); }
+		else { fs.unlinkSync(p); }
+	}
+	function copyTree(a, b) {
+		if (isDir(a)) {
+			if (!exists(b)) { fs.mkdirSync(b); }
+			fs.readdirSync(a).forEach(function (n) { copyTree(a + "/" + n, b + "/" + n); });
+		} else { fs.writeFileSync(b, fs.readFileSync(a)); }
+	}
+	function finish(sync, done, code) { if (sync) { done(code); } else { setImmediate(function () { done(code); }); } }
+
+	commands.rm = function (args, io, done, sync) {
+		var o = flags(args), code = 0;
+		o.args.forEach(function (p) {
+			if (!exists(p)) { if (!o.f.f) { io.err("rm: can't remove '" + p + "': No such file or directory\n"); code = 1; } return; }
+			if (isDir(p) && !o.f.r && !o.f.R) { io.err("rm: '" + p + "' is a directory\n"); code = 1; return; }
+			try { removeTree(p); } catch (e) { io.err("rm: can't remove '" + p + "': " + e.message + "\n"); code = 1; }
+		});
+		finish(sync, done, code);
+	};
+	commands.rmdir = function (args, io, done, sync) {
+		var code = 0;
+		flags(args).args.forEach(function (p) { try { fs.rmdirSync(p); } catch (e) { io.err("rmdir: '" + p + "': " + e.message + "\n"); code = 1; } });
+		finish(sync, done, code);
+	};
+	commands.mkdir = function (args, io, done, sync) {
+		var o = flags(args), code = 0;
+		o.args.forEach(function (p) {
+			try { if (o.f.p) { if (!isDir(p)) { fs.mkdirSync(p, { recursive: true }); } } else { fs.mkdirSync(p); } }
+			catch (e) { io.err("mkdir: can't create directory '" + p + "': " + e.message + "\n"); code = 1; }
+		});
+		finish(sync, done, code);
+	};
+	commands.mv = function (args, io, done, sync) {
+		var o = flags(args), list = o.args, code = 0;
+		if (list.length < 2) { io.err("mv: missing operand\n"); return finish(sync, done, 1); }
+		var dest = list.pop();
+		list.forEach(function (src) {
+			var to = isDir(dest) ? dest + "/" + src.replace(/^.*\//, "") : dest;
+			try { if (exists(to) && !isDir(to)) { fs.unlinkSync(to); } fs.renameSync(src, to); }
+			catch (e) {
+				try { copyTree(src, to); removeTree(src); }
+				catch (e2) { io.err("mv: can't rename '" + src + "': " + e2.message + "\n"); code = 1; }
+			}
+		});
+		finish(sync, done, code);
+	};
+	commands.cp = function (args, io, done, sync) {
+		var o = flags(args), list = o.args, code = 0;
+		if (list.length < 2) { io.err("cp: missing operand\n"); return finish(sync, done, 1); }
+		var dest = list.pop();
+		list.forEach(function (src) {
+			var to = isDir(dest) ? dest + "/" + src.replace(/^.*\//, "") : dest;
+			if (isDir(src) && !o.f.r && !o.f.R && !o.f.a) { io.err("cp: omitting directory '" + src + "'\n"); code = 1; return; }
+			try { copyTree(src, to); } catch (e) { io.err("cp: can't copy '" + src + "': " + e.message + "\n"); code = 1; }
+		});
+		finish(sync, done, code);
+	};
+	commands.touch = function (args, io, done, sync) {
+		flags(args).args.forEach(function (p) { if (!exists(p)) { fs.writeFileSync(p, ""); } });
+		finish(sync, done, 0);
+	};
+	commands.cat = function (args, io, done, sync) {
+		var code = 0;
+		flags(args).args.forEach(function (p) { try { io.out(fs.readFileSync(p)); } catch (e) { io.err("cat: can't open '" + p + "': No such file or directory\n"); code = 1; } });
+		finish(sync, done, code);
+	};
+	commands.echo = function (args, io, done, sync) {
+		var n = args[0] === "-n"; io.out((n ? args.slice(1) : args).join(" ") + (n ? "" : "\n"));
+		finish(sync, done, 0);
+	};
+	commands["true"] = function (args, io, done, sync) { finish(sync, done, 0); };
+	commands["false"] = function (args, io, done, sync) { finish(sync, done, 1); };
+	commands.sync = commands["true"];
+	// ionice -c3 <command...>: the command, at whatever priority the frame has.
+	commands.ionice = function (args, io, done, sync) {
+		var i = 0;
+		while (i < args.length && /^-/.test(args[i])) { i += /^-[cnp]$/.test(args[i]) ? 2 : 1; }
+		if (sync) { var r = syncRun(args.slice(i)); io.out(r.out); io.err(r.err.toString()); return done(r.code); }
+		runCommand(args.slice(i), io, done);
+	};
+	commands.nice = function (args, io, done, sync) {
+		var i = 0;
+		while (i < args.length && /^-/.test(args[i])) { i += args[i] === "-n" ? 2 : 1; }
+		if (sync) { var r = syncRun(args.slice(i)); io.out(r.out); io.err(r.err.toString()); return done(r.code); }
+		runCommand(args.slice(i), io, done);
+	};
+	// upstart's and the crash reporter's: told, and nothing on W10M listens.
+	commands.initctl = function (args, io, done, sync) { hostLog("info", "initctl " + args.join(" ")); finish(sync, done, 0); };
+	commands.rdx_reporter = function (args, io, done, sync) { hostLog("info", "rdx_reporter " + args.join(" ")); finish(sync, done, 0); };
+	commands.sh = function (args, io, done, sync) {
+		if (args[0] === "-c" && args.length > 1) {
+			if (sync) { var list = parseLine(args[1]), r = { code: 0, out: new Buffer(0), err: new Buffer(0) }; for (var k = 0; k < list.length; k++) { r = syncRun(list[k].argv); io.out(r.out); io.err(r.err.toString()); } return done(r.code); }
+			return runLine(args[1], io, done);
+		}
+		io.err("sh: only sh -c runs on W10M\n");
+		finish(sync, done, 127);
+	};
+
+	// ---- curl (AndroidLuna's curl.js) ----
+
+	commands.curl = function (argv, io, done) {
+		var E = { UNKNOWN_OPTION: 2, URL_MALFORMAT: 3, RESOLVE: 6, CONNECT: 7, HTTP: 22, WRITE: 23, READ: 26, TIMEOUT: 28, TOO_MANY_REDIRECTS: 47, RECV: 56 };
+		var opt = { silent: false, showError: false, location: false, fail: false, maxTime: 0, connectTimeout: 0, headers: [], method: null, data: null,
+			head: false, include: false, dumpHeader: null, writeOut: null, userAgent: "curl/7.88.1", insecure: false, referer: null, user: null, maxRedirs: 50,
+			createDirs: false, jobs: [], get: false };
+		var pendingOutput = [], finished = false, maxTimer = null;
+		function end(code) {
+			if (finished) { return; }
+			finished = true;
+			if (maxTimer) { clearTimeout(maxTimer); }
+			done(code);
+		}
+		function die(code, text) { if (!opt.silent || opt.showError) { io.err("curl: (" + code + ") " + text + "\n"); } end(code); }
+		var TAKES = { "max-time": 1, "connect-timeout": 1, header: 1, request: 1, data: 1, "data-binary": 1, "data-raw": 1, "data-ascii": 1, "data-urlencode": 1,
+			"dump-header": 1, output: 1, "write-out": 1, "user-agent": 1, config: 1, referer: 1, user: 1, "max-redirs": 1, retry: 1, "retry-delay": 1,
+			"retry-max-time": 1, noproxy: 1, cacert: 1, capath: 1, cert: 1, key: 1, "limit-rate": 1, url: 1 };
+		var SHORT = { m: "max-time", H: "header", X: "request", d: "data", D: "dump-header", o: "output", w: "write-out", A: "user-agent", K: "config",
+			e: "referer", u: "user", s: "silent", S: "show-error", L: "location", f: "fail", I: "head", k: "insecure", v: "verbose", i: "include",
+			G: "get", "#": "progress-bar" };
+		var FLAGS = { silent: 1, "show-error": 1, location: 1, fail: 1, head: 1, insecure: 1, compressed: 1, verbose: 1, "no-buffer": 1, globoff: 1,
+			"http1.1": 1, "no-keepalive": 1, "tr-encoding": 1, "no-progress-meter": 1, "progress-bar": 1, include: 1, "create-dirs": 1, get: 1,
+			"fail-with-body": 1, "no-sessionid": 1, "tlsv1.2": 1, "tlsv1.3": 1, sslv3: 1, "ssl-reqd": 1 };
+		var bad = null;
+		function apply(name, value) {
+			switch (name) {
+				case "silent": opt.silent = true; break;
+				case "show-error": opt.showError = true; break;
+				case "location": opt.location = true; break;
+				case "fail": case "fail-with-body": opt.fail = true; break;
+				case "head": opt.head = true; break;
+				case "include": opt.include = true; break;
+				case "insecure": opt.insecure = true; break;
+				case "create-dirs": opt.createDirs = true; break;
+				case "get": opt.get = true; break;
+				// Windows checks certificates against its own store; a CA file has nothing to add to it.
+				case "cacert": case "capath": case "cert": case "key": case "limit-rate": break;
+				case "compressed": case "verbose": case "no-buffer": case "globoff": case "http1.1": case "no-keepalive": case "tr-encoding":
+				case "no-progress-meter": case "progress-bar": case "retry": case "retry-delay": case "retry-max-time": case "noproxy":
+				case "no-sessionid": case "tlsv1.2": case "tlsv1.3": case "sslv3": case "ssl-reqd": break;
+				case "max-time": opt.maxTime = parseFloat(value) * 1000; break;
+				case "connect-timeout": opt.connectTimeout = parseFloat(value) * 1000; break;
+				case "max-redirs": opt.maxRedirs = parseInt(value, 10); break;
+				case "header": opt.headers.push(value); break;
+				case "request": opt.method = value; break;
+				case "data": case "data-ascii": case "data-binary": case "data-raw": case "data-urlencode":
+					if (name === "data-urlencode") { var eq = value.indexOf("="); value = eq < 0 ? encodeURIComponent(value) : value.slice(0, eq + 1) + encodeURIComponent(value.slice(eq + 1)); }
+					else if (name !== "data-raw" && value.charAt(0) === "@") { value = fs.readFileSync(value.slice(1)); }
+					opt.data = opt.data === null ? value : Buffer.concat([new Buffer(opt.data), new Buffer("&"), new Buffer(value)]);
+					break;
+				case "dump-header": opt.dumpHeader = value; break;
+				case "output": pendingOutput.push(value); break;
+				case "write-out": opt.writeOut = value; break;
+				case "user-agent": opt.userAgent = value; break;
+				case "referer": opt.referer = value; break;
+				case "user": opt.user = value; break;
+				case "config": readConfig(value); break;
+				case "url": opt.jobs.push({ url: value, output: null }); break;
+				default: bad = bad || "option --" + name + ": is unknown";
+			}
+		}
+		function readConfig(file) {
+			var text = fs.readFileSync(file, "utf8");
+			text.split(/\r?\n/).forEach(function (line) {
+				line = line.trim();
+				if (!line || line.charAt(0) === "#") { return; }
+				var m = /^-{0,2}([A-Za-z0-9.-]+)\s*(?:[=:]\s*|\s+)?(.*)$/.exec(line);
+				if (!m) { return; }
+				var name = m[1], value = m[2];
+				if (name.length === 1 && SHORT[name]) { name = SHORT[name]; }
+				if (value.charAt(0) === "\"") { value = JSON.parse(value.replace(/\\(?!["\\\/bfnrtu])/g, "\\\\")); }
+				apply(name, FLAGS[name] ? null : value);
+			});
+		}
+		for (var i = 0; i < argv.length && !bad; i++) {
+			var a = argv[i];
+			if (a.indexOf("--") === 0) {
+				var nm = a.slice(2);
+				if (TAKES[nm]) { apply(nm, argv[++i]); } else if (FLAGS[nm]) { apply(nm); } else { bad = "option " + a + ": is unknown"; }
+			} else if (a.charAt(0) === "-" && a.length > 1) {
+				for (var j = 1; j < a.length; j++) {
+					var sn = SHORT[a.charAt(j)];
+					if (!sn) { bad = "option -" + a.charAt(j) + ": is unknown"; break; }
+					if (TAKES[sn]) { apply(sn, j + 1 < a.length ? a.slice(j + 1) : argv[++i]); break; }
+					apply(sn);
+				}
+			} else { apply("url", a); }
+		}
+		if (bad) { return setImmediate(function () { die(E.UNKNOWN_OPTION, bad); }); }
+		opt.jobs.forEach(function (job, k) { job.output = pendingOutput[k] || null; });
+		if (!opt.jobs.length) { return setImmediate(function () { die(E.URL_MALFORMAT, "no URL specified"); }); }
+		if (opt.get && opt.data !== null) {
+			opt.jobs.forEach(function (job) { job.url += (job.url.indexOf("?") < 0 ? "?" : "&") + opt.data.toString(); });
+			opt.data = null;
+		}
+		if (opt.dumpHeader && opt.dumpHeader !== "-") { try { fs.writeFileSync(opt.dumpHeader, ""); } catch (e) { return setImmediate(function () { die(E.WRITE, "Failed writing header"); }); } }
+		if (opt.maxTime) { maxTimer = setTimeout(function () { die(E.TIMEOUT, "Operation timed out after " + opt.maxTime + " milliseconds"); }, opt.maxTime); }
+
+		function rawHeaders(res) {
+			var s = "HTTP/" + res.httpVersion + " " + res.statusCode + " " + res.statusMessage + "\r\n";
+			for (var k = 0; k < res.rawHeaders.length; k += 2) { s += res.rawHeaders[k] + ": " + res.rawHeaders[k + 1] + "\r\n"; }
+			return s + "\r\n";
+		}
+		function dumpHeaders(res) { if (opt.dumpHeader === "-") { io.out(rawHeaders(res)); } else { fs.appendFileSync(opt.dumpHeader, rawHeaders(res)); } }
+		function pad3(n) { n = String(n || 0); while (n.length < 3) { n = "0" + n; } return n; }
+		function writeOut(fmt, r) {
+			return fmt.replace(/%\{([a-z_]+)\}|\\n|\\r|\\t|%%/g, function (m, v) {
+				if (m === "\\n") { return "\n"; } if (m === "\\r") { return "\r"; } if (m === "\\t") { return "\t"; } if (m === "%%") { return "%"; }
+				switch (v) {
+					case "http_code": case "response_code": return pad3(r.status);
+					case "url_effective": return r.url;
+					case "size_download": return String(r.size || 0);
+					case "content_type": return r.contentType || "";
+					case "num_redirects": return String(r.redirects || 0);
+					case "redirect_url": return r.redirectUrl || "";
+					case "time_total": return ((Date.now() - r.start) / 1000).toFixed(6);
+					default: return "";
+				}
+			});
+		}
+		function fetchOnce(job, target, method, body, redirects, start, fin) {
+			var answered = false;
+			function ok(code, text, result) { if (!answered) { answered = true; fin(code, text, result); } }
+			var u = url.parse(target);
+			if (!u.protocol || !u.host) { return ok(E.URL_MALFORMAT, "URL rejected: Malformed input to a URL function"); }
+			var mod = u.protocol === "https:" ? https : u.protocol === "http:" ? http : null;
+			if (!mod) { return ok(1, "Protocol \"" + u.protocol.replace(":", "") + "\" not supported"); }
+			var headers = {};
+			function setHeader(name, value) {
+				Object.keys(headers).forEach(function (k) { if (k.toLowerCase() === name.toLowerCase()) { delete headers[k]; } });
+				if (value !== null) { headers[name] = value; }
+			}
+			setHeader("User-Agent", opt.userAgent);
+			setHeader("Accept", "*/*");
+			if (opt.referer) { setHeader("Referer", opt.referer); }
+			var fromUrl = null;
+			if (u.auth) { try { fromUrl = decodeURIComponent(u.auth); } catch (e) { fromUrl = u.auth; } }
+			var user = opt.user || fromUrl;
+			if (user) { setHeader("Authorization", "Basic " + new Buffer(user).toString("base64")); }
+			if (body !== null) { setHeader("Content-Type", "application/x-www-form-urlencoded"); }
+			opt.headers.forEach(function (h) {
+				var k = h.indexOf(":");
+				if (k > 0) { var v = h.slice(k + 1).trim(); setHeader(h.slice(0, k).trim(), v || null); }
+			});
+			var req = mod.request({ protocol: u.protocol, hostname: u.hostname, port: u.port, path: u.path, method: method, headers: headers }, function (res) {
+				var loc = res.headers.location;
+				if (opt.location && loc && [301, 302, 303, 307, 308].indexOf(res.statusCode) >= 0) {
+					res.resume();
+					if (redirects >= opt.maxRedirs) { return ok(E.TOO_MANY_REDIRECTS, "Maximum (" + opt.maxRedirs + ") redirects followed"); }
+					var nextUrl = url.resolve(target, loc);
+					var keep = res.statusCode === 307 || res.statusCode === 308 || opt.method;
+					if (opt.dumpHeader) { dumpHeaders(res); }
+					return fetchOnce(job, nextUrl, keep ? method : (method === "POST" ? "GET" : method), keep ? body : null, redirects + 1, start, ok);
+				}
+				if (opt.dumpHeader) { dumpHeaders(res); }
+				var result = { status: res.statusCode, url: target, contentType: res.headers["content-type"], redirects: redirects, start: start, size: 0,
+					redirectUrl: loc ? url.resolve(target, loc) : "" };
+				if (opt.fail && res.statusCode >= 400) { res.resume(); return ok(E.HTTP, "The requested URL returned error: " + res.statusCode, result); }
+				var chunks = [];
+				if (opt.include && !opt.head) { chunks.push(new Buffer(rawHeaders(res))); }
+				res.on("data", function (d) { result.size += d.length; if (!opt.head) { chunks.push(d); } });
+				res.on("error", function () { ok(E.RECV, "Failure when receiving data from the peer", result); });
+				res.on("end", function () {
+					if (opt.head && !opt.dumpHeader) { chunks = [new Buffer(rawHeaders(res))]; }
+					var data = Buffer.concat(chunks);
+					if (job.output && job.output !== "-") {
+						try {
+							if (opt.createDirs) { var dir = job.output.replace(/\/[^\/]*$/, ""); if (dir && !isDir(dir)) { fs.mkdirSync(dir, { recursive: true }); } }
+							fs.writeFileSync(job.output, data);
+						} catch (e) { return ok(E.WRITE, "Failure writing output to destination", result); }
+					} else { io.out(data); }
+					ok(0, null, result);
+				});
+			});
+			req.on("error", function (e) {
+				var code = e.code === "ETIMEDOUT" ? E.TIMEOUT : e.code === "ENOTFOUND" ? E.RESOLVE : E.CONNECT;
+				ok(code, code === E.TIMEOUT ? "Connection timed out" : code === E.RESOLVE ? "Could not resolve host: " + u.hostname
+					: "Failed to connect to " + u.hostname + " port " + (u.port || (u.protocol === "https:" ? 443 : 80)));
+			});
+			if (opt.connectTimeout) { req.setTimeout(opt.connectTimeout); }
+			if (body !== null) { req.write(body); }
+			req.end();
+		}
+		var status = 0;
+		(function next(k) {
+			if (finished) { return; }
+			if (k >= opt.jobs.length) { return end(status); }
+			var job = opt.jobs[k];
+			var method = opt.method || (opt.head ? "HEAD" : opt.data !== null ? "POST" : "GET");
+			fetchOnce(job, job.url, method, opt.data, 0, Date.now(), function (code, text, result) {
+				if (opt.writeOut && result) { io.out(writeOut(opt.writeOut, result)); }
+				if (code) { status = code; if (!opt.silent || opt.showError) { io.err("curl: (" + code + ") " + text + "\n"); } }
+				next(k + 1);
+			});
+		})(0);
 	};
 
 	// ---- vm: a context is a frame of its own ----

@@ -25,8 +25,12 @@ namespace LunaKit
     /// - `system/setDeviceId`: carry a TouchPad's device id over, or go back to this install's.
     /// - `system/saveLog` and `system/shareLog`: the log into Downloads, and Windows' share pane.
     /// - `android/openSettings`: the host's own settings, Windows' About page here.
-    /// Android-only parts (Android's notifications, runtime permissions, home screen pins) are
-    /// not registered, so the bus answers that they don't exist.
+    /// - `permissions/status` and `permissions/request`: First Use's questions, put to Windows
+    ///   (location, background, notification access, People and Calendar), with `hostName`.
+    /// - `firstUse/done`, and Windows' notifications under Android's method names, which the
+    ///   Notifications app calls.
+    /// What Windows 10 Mobile can't do (being the home screen, controlling another app's
+    /// player) answers with an error that says so.
     internal sealed class LunacyService
     {
         private const string Service = "org.webosarchive.lunacy";
@@ -44,7 +48,7 @@ namespace LunaKit
                 catch (Exception e) { r = Bus.Error("system/getEnvironment: " + e.Message); }
                 c.Reply(r);
             }));
-            bus.Register(Service, "system/setFixedViewport", c =>
+            Own(bus, "system/setFixedViewport", "set an app's viewport", c =>
             {
                 var id = c.Params.GetString("id");
                 if (string.IsNullOrEmpty(id) || shell.Apps.Get(id) == null) { c.Reply(Bus.Error("No app " + id)); return; }
@@ -53,7 +57,7 @@ namespace LunaKit
                 shell.Evaluate("__lunacyShell.setZoom(" + J.Str(id) + "," + (on ? "true" : "false") + ")");
                 c.Reply(Bus.Ok());
             });
-            bus.Register(Service, "system/setLayout", c =>
+            Own(bus, "system/setLayout", "set the layout", c =>
             {
                 if (!c.Params.ContainsKey("appLayoutWidth")) { c.Reply(Bus.Error("Nothing to set")); return; }
                 var w = c.Params.GetInt("appLayoutWidth");
@@ -62,7 +66,7 @@ namespace LunaKit
                 shell.Evaluate("__lunacyShell.setLayoutWidth(" + w + ")");
                 c.Reply(Bus.Ok());
             });
-            bus.Register(Service, "system/setDeviceId", c =>
+            Own(bus, "system/setDeviceId", "set the device id", c =>
             {
                 if (c.Params.GetBool("reset")) { DeviceProfile.SetNduid(null); c.Reply(Bus.Ok()); return; }
                 var id = (c.Params.GetString("nduid") ?? "").Trim();
@@ -70,12 +74,12 @@ namespace LunaKit
                 DeviceProfile.SetNduid(id);
                 c.Reply(Bus.Ok());
             });
-            bus.Register(Service, "system/saveLog", c => Task.Run(async () =>
+            Own(bus, "system/saveLog", "save a log", c => Task.Run(async () =>
             {
                 try { c.Reply(await SaveLog()); }
                 catch (Exception e) { c.Reply(Bus.Error("The log couldn't be saved: " + e.Message)); }
             }));
-            bus.Register(Service, "system/shareLog", c =>
+            Own(bus, "system/shareLog", "share a log", c =>
             {
                 var file = lastLog;
                 if (file == null) { c.Reply(Bus.Error("Save the log first")); return; }
@@ -99,7 +103,194 @@ namespace LunaKit
                 bool ok = await Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:about"));
                 c.Reply(ok ? Bus.Ok() : Bus.Error("Windows couldn't open its settings"));
             }));
+            // First Use and the permissions it asks for (Windows' own questions).
+            bus.Register(Service, "permissions/status", c => c.Reply(PermissionsStatus()));
+            bus.Register(Service, "permissions/request", RequestPermission);
+            Own(bus, "firstUse/done", "finish First Use", c => { SetFlag(FirstUseKey); SetFlag(BackgroundAskedKey); c.Reply(Bus.Ok()); shell.FirstUseDone(); });
+            // Windows' notifications, for the Notifications app (the method names are Android's,
+            // which the app calls).
+            Own(bus, "android/notifications", "read Windows' notifications", WatchNotifications);
+            Own(bus, "android/openNotification", "open Windows' notifications", c =>
+            {
+                var key = c.Params.GetString("key") ?? "";
+                if (key.Length == 0) { c.Reply(Bus.Error("key is required")); return; }
+                var err = shell.Notifications.Open(key);
+                c.Reply(err == null ? Bus.Ok() : Bus.Error(err));
+            });
+            Own(bus, "android/dismissNotifications", "dismiss Windows' notifications", c =>
+            {
+                var keys = Jx.ObjOrEmpty(c.Raw).Arr("keys");
+                if (keys == null) { c.Reply(Bus.Error("keys is required")); return; }
+                shell.Notifications.Dismiss(keys.OfType<string>().Where(k => k.Length > 0));
+                c.Reply(Bus.Ok());
+            });
+            Own(bus, "android/mediaControl", "control Windows' players", c =>
+                c.Reply(Bus.Error("Windows 10 Mobile doesn't let Lunacy control another app's player")));
         }
+
+        // ---- First Use's flags, kept in the app's settings ----
+
+        public const string FirstUseKey = "firstUseDone", LocationAskedKey = "locationAsked", BackgroundAskedKey = "backgroundAsked";
+        public static bool Flag(string key)
+        {
+            object v;
+            return ApplicationData.Current.LocalSettings.Values.TryGetValue(key, out v) && v is bool && (bool)v;
+        }
+        public static void SetFlag(string key) { ApplicationData.Current.LocalSettings.Values[key] = true; }
+
+        /// Lunacy's own bundled apps (AndroidLuna's ownApp): org.webosarchive.lunacy.* and the
+        /// settings apps that are Lunacy's own; never an installed app with such an id.
+        private static readonly HashSet<string> OwnApps = new HashSet<string> { "com.palm.app.deviceinfo", "com.palm.app.screenlock", "com.palm.app.swmanager" };
+        private bool OwnApp(string appId)
+        {
+            var known = OwnApps.Contains(appId) || appId.StartsWith("org.webosarchive.lunacy", StringComparison.Ordinal);
+            var a = shell.Apps.Get(appId);
+            return known && a != null && !a.Removable;
+        }
+
+        private void Own(Bus bus, string method, string what, Action<Bus.Call> h)
+        {
+            bus.Register(Service, method, c =>
+            {
+                if (OwnApp(c.AppId)) h(c);
+                else c.Reply(Bus.Error("Only Lunacy's own apps can " + what + " (asked by " + c.AppId + ")", -1));
+            });
+        }
+
+        // ---- permissions, for First Use ----
+
+        /// What Lunacy may do here, in Android's shape (First Use reads it): each permission says
+        /// whether Windows asks for it at all (`asked`) and whether it is granted now.
+        /// - storage: the phone's libraries behind /media/internal, granted at install on 15063.
+        /// - location: Windows' location consent, for Location Services and the Wi-Fi list.
+        /// - background: BackgroundExecutionManager's access (Background.cs).
+        /// - notifications: reading other apps' toasts (WindowsNotifications.cs).
+        /// - systemSettings: Screen &amp; Lock's brightness and timeout need no permission here.
+        /// - homeLauncher: Windows 10 Mobile lets no app be the home screen.
+        private string PermissionsStatus()
+        {
+            return new JObj().Put("returnValue", true)
+                .Put("storage", Perm(false, true))
+                .Put("location", Perm(true, LocationGranted()))
+                .Put("contacts", Perm(shell.Contacts.Asked, shell.Contacts.Granted))
+                .Put("calendar", Perm(shell.Calendar.Asked, shell.Calendar.Granted))
+                .Put("systemSettings", Perm(false, true))
+                .Put("background", Perm(true, Background.Granted))
+                .Put("homeLauncher", Perm(false, false))
+                .Put("notifications", Perm(WindowsNotifications.Supported, shell.Notifications.Granted))
+                .Put("firstUseDone", Flag(FirstUseKey))
+                // What First Use and the account's page call the system Lunacy runs on.
+                .Put("hostName", WindowsAccountTemplate.HostName).ToString();
+        }
+
+        private static JObj Perm(bool asked, bool granted) { return new JObj().Put("asked", asked).Put("granted", granted); }
+
+        public static bool LocationGranted()
+        {
+            try
+            {
+                return Windows.Devices.Enumeration.DeviceAccessInformation.CreateFromDeviceClass(Windows.Devices.Enumeration.DeviceClass.Location).CurrentStatus
+                    == Windows.Devices.Enumeration.DeviceAccessStatus.Allowed;
+            }
+            catch (Exception) { return false; }
+        }
+
+        private static string Granted(string which, bool granted, bool? askAgain = null, bool opened = false)
+        {
+            var o = new JObj().Put("returnValue", true).Put("permission", which).Put("granted", granted);
+            if (askAgain.HasValue) o.Put("askAgain", askAgain.Value);
+            if (opened) o.Put("opened", true);
+            return o.ToString();
+        }
+
+        private void RequestPermission(Bus.Call c)
+        {
+            var which = c.Params.GetString("permission") ?? "";
+            if (!OwnApp(c.AppId)) { c.Reply(Bus.Error("Only Lunacy's own apps can ask for Windows' permissions (asked by " + c.AppId + ")", -1)); return; }
+            bool viaSettings = c.Params.GetBool("viaSettings");
+            switch (which)
+            {
+                case "storage":
+                case "systemSettings":
+                    c.Reply(Granted(which, true));
+                    return;
+                case "location":
+                    SetFlag(LocationAskedKey);
+                    if (LocationGranted()) { c.Reply(Granted(which, true)); return; }
+                    shell.Ui(async () =>
+                    {
+                        if (viaSettings) { c.Reply(await OpenSettings("ms-settings:privacy-location") ? Granted(which, false, null, true) : Bus.Error("Couldn't open Windows' location settings")); return; }
+                        Windows.Devices.Geolocation.GeolocationAccessStatus s;
+                        try { s = await Windows.Devices.Geolocation.Geolocator.RequestAccessAsync(); }
+                        catch (Exception e) { c.Reply(Bus.Error("Windows didn't ask: " + e.Message)); return; }
+                        LunaLog.Write("[lunacy] location access: " + s);
+                        // Windows asks once; after a no, only its settings can change it.
+                        c.Reply(Granted(which, s == Windows.Devices.Geolocation.GeolocationAccessStatus.Allowed, s == Windows.Devices.Geolocation.GeolocationAccessStatus.Unspecified));
+                    });
+                    return;
+                case "background":
+                    SetFlag(BackgroundAskedKey);
+                    if (Background.Granted) { c.Reply(Granted(which, true)); return; }
+                    shell.Ui(async () =>
+                    {
+                        if (await Background.Request()) { c.Reply(Granted(which, true)); return; }
+                        // Refused, or left to the battery saver: Windows' own switch for Lunacy.
+                        c.Reply(await OpenSettings("ms-settings:batterysaver-usagedetails") ? Granted(which, false, null, true) : Bus.Error("Couldn't open Windows' battery settings"));
+                    });
+                    return;
+                case "notifications":
+                    if (!WindowsNotifications.Supported) { c.Reply(Bus.Error("This version of Windows can't share its notifications with Lunacy")); return; }
+                    if (shell.Notifications.Granted) { c.Reply(Granted(which, true)); return; }
+                    shell.Ui(async () =>
+                    {
+                        if (await shell.Notifications.Request()) { c.Reply(Granted(which, true)); return; }
+                        c.Reply(await OpenSettings("ms-settings:privacy-notifications") ? Granted(which, false, null, true) : Bus.Error("Couldn't open Windows' notification settings"));
+                    });
+                    return;
+                case "contacts":
+                case "calendar":
+                    {
+                        AccountSide side = which == "contacts" ? (AccountSide)shell.Contacts : shell.Calendar;
+                        shell.Ui(async () =>
+                        {
+                            if (await side.Request()) { c.Reply(Granted(which, true)); return; }
+                            // Windows has no dialog for these: its privacy settings are the only place to allow them.
+                            if (viaSettings) { c.Reply(await OpenSettings(which == "contacts" ? "ms-settings:privacy-contacts" : "ms-settings:privacy-calendar") ? Granted(which, false, null, true) : Bus.Error("Couldn't open Windows' privacy settings")); return; }
+                            c.Reply(Granted(which, false, false));
+                        });
+                        return;
+                    }
+                case "homeLauncher":                    c.Reply(Bus.Error("Windows 10 Mobile doesn't let an app be the home screen"));
+                    return;
+                default:
+                    c.Reply(Bus.Error("No permission \"" + which + "\": storage, location, contacts, calendar, systemSettings, background, notifications, homeLauncher"));
+                    return;
+            }
+        }
+
+        private static async Task<bool> OpenSettings(string uri)
+        {
+            try { return await Windows.System.Launcher.LaunchUriAsync(new Uri(uri)); } catch (Exception) { return false; }
+        }
+
+        // ---- Windows' notifications ----
+
+        private readonly Subscribers notificationWatchers = new Subscribers();
+
+        private void WatchNotifications(Bus.Call c)
+        {
+            c.Reply(shell.Notifications.Snapshot(true));
+            if (c.Subscribe && !c.Cancelled) notificationWatchers.Add(c);
+        }
+
+        /// Windows' notifications changed: whoever is watching hears them; a banner is told once.
+        public void NotificationsChanged()
+        {
+            if (notificationWatchers.Count == 0) return;
+            notificationWatchers.Send(shell.Notifications.Snapshot(true));
+        }
+
+        public bool NotificationsWatched { get { return notificationWatchers.Count > 0; } }
 
         private async Task<string> Environment()
         {

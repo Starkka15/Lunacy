@@ -133,3 +133,47 @@ body.launcher #cards { visibility: hidden; }
 #edge.lit::after { opacity: 1; }
 body.maximized #edge { display: block; }
 body.maximized #notifications, body.maximized #popups { bottom: 28px; }
+
+/* Exhibition, webOS's dock mode (AndroidLuna's ExhibitionController, ExhibitionLayer): black
+   over the cards and launcher, the Time face or an app's dock window, the title's drop-down of
+   faces. Dashboards and alerts stay over it, as on a device. */
+#exhibition {
+	position: absolute; left: 0; top: 0; right: 0; bottom: 0;
+	background: #000; display: none; z-index: 40; overflow: hidden;
+}
+body.exhibiting #exhibition { display: block; }
+body.exhibiting #cards, body.exhibiting #dock, body.exhibiting #launcher, body.exhibiting #edge { visibility: hidden; }
+#exh-bar {
+	position: absolute; left: 0; top: 0; right: 0; height: 28px;
+	background: #000; color: #fff; font: bold 14px Prelude, sans-serif; line-height: 28px; text-align: center;
+}
+#exh-title { display: inline-block; padding: 0 22px 0 12px; background: url(/__lunacy/luna/images/menu-arrow-down.png) right center no-repeat; }
+#exh-done { position: absolute; right: 10px; top: 0; color: #9cf; font-weight: normal; }
+#exh-time {
+	position: absolute; left: 0; right: 0; top: 28px; bottom: 0;
+	display: flex; flex-direction: column; align-items: center; justify-content: center;
+	color: #fff; font-family: Prelude, sans-serif; transition: opacity 0.5s;
+}
+#exh-clock { font-size: 22vmin; font-weight: 200; letter-spacing: -0.02em; }
+#exh-date { font-size: 5vmin; color: #aaa; margin-top: 1vmin; }
+#exh-windows { position: absolute; left: 0; right: 0; top: 28px; bottom: 0; }
+.dockwin { position: absolute; left: 0; top: 0; overflow: hidden; transition: opacity 0.5s; }
+.dockwin iframe { border: 0; display: block; transform-origin: 0 0; background: #000; }
+#exh-menu {
+	position: absolute; top: 28px; left: 50%; width: 260px; margin-left: -130px; max-height: 70%; overflow-y: auto;
+	background: rgba(30,30,30,0.96); border-radius: 0 0 8px 8px; display: none;
+}
+#exh-menu.open { display: block; }
+.exh-item { display: flex; align-items: center; height: 52px; padding: 0 12px; color: #fff; font: 16px Prelude, sans-serif; border-top: 1px solid #333; }
+.exh-item img { width: 40px; height: 40px; margin-right: 12px; }
+.exh-item.on { background: rgba(80,140,220,0.4); }
+#exh-edge { position: absolute; left: 0; right: 0; bottom: 0; height: 28px; }
+/* The launcher's Delete. */
+#delete-ask {
+	position: absolute; left: 16px; right: 16px; top: 30%; z-index: 60;
+	background: rgba(32,32,32,0.97); border-radius: 10px; padding: 16px; color: #fff; font: 16px Prelude, sans-serif;
+}
+.delete-row { display: flex; margin-top: 14px; }
+.delete-yes, .delete-no { flex: 1; text-align: center; padding: 10px 0; border-radius: 6px; margin: 0 4px; }
+.delete-yes { background: #b52b2b; }
+.delete-no { background: #444; }

@@ -23,6 +23,8 @@ namespace LunaKit
         public void WindowOpened(int win, string appId, string type) { shell.Opened(win, appId, type); }
         public void WindowClosed(int win) { shell.Closed(win); }
         public void ShellLog(string msg) { LunaLog.Write("[shell] " + msg); }
+        /// Something the shell's page did that the host acts on (Exhibition ending).
+        public void ShellEvent(string what, string arg) { shell.ShellEvent(what, arg); }
 
         // A window's page starting, and its log.
         public void PageStart(int win) { var w = W(win); if (w != null) w.PageStart(); }

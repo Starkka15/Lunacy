@@ -280,6 +280,8 @@ enyo.kind({
 	// [Lunacy] The switch shows what the service says, so a refused call can't leave it wrong.
 	gotAndroidReminders: function gotAndroidReminders(inSender, inResponse){
 		var active = Boolean(inResponse && inResponse.returnValue && inResponse.active);
+		// The account's name on this host, when the account's service gives one (Android's doesn't).
+		inResponse && inResponse.hostName && this.$.androidReminders.setCaption(enyo.macroize($L("#{host} Calendars"), {host: inResponse.hostName}));
 		this.$.androidReminders.setShowing(active);
 		active && this.$.androidRemindersToggle.setState(inResponse.on);
 	},

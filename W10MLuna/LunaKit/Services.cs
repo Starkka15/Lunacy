@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Windows.Graphics.Display;
 using Windows.Media;
 using Windows.Networking.Connectivity;
 using Windows.UI.Core;
@@ -58,6 +59,10 @@ namespace LunaKit
     /// information. A subscription gets the status at once and again whenever it changes.
     internal sealed class ConnectionManager
     {
+        /// Phone's and the setup apps' call to bring up a carrier's data service: Windows runs
+        /// the phone's cellular data itself, so no APN is Lunacy's to start (as on a TouchPad
+        /// with no modem, whose CarrierDB had none).
+        public static string CellularData() { return Bus.Error("APN Not found in CarrierDB"); }
         private readonly Subscribers subscribers = new Subscribers();
         private string last = "";
 
@@ -82,6 +87,7 @@ namespace LunaKit
             };
             bus.Register("com.palm.connectionmanager", "getstatus", h);
             bus.Register("com.palm.connectionmanager", "getStatus", h);
+            bus.Register("com.palm.connectionmanager", "connectCellularDataService", c => c.Reply(CellularData()));
         }
 
         public static string Status()
@@ -112,6 +118,40 @@ namespace LunaKit
     internal sealed class Keys
     {
         private readonly Subscribers media = new Subscribers();
+        private readonly Subscribers headset = new Subscribers();
+        private bool watchingHeadset;
+        private string headsetState;
+
+        /// The headset, as webOS's keys service reported it: "headset", "headset_mic_less" or
+        /// "none". Windows says which audio device is the default; a phone's jack shows as a
+        /// device named for headphones or a headset, its microphone as a capture device too.
+        private void WatchHeadset()
+        {
+            if (watchingHeadset) return;
+            watchingHeadset = true;
+            Windows.Media.Devices.MediaDevice.DefaultAudioRenderDeviceChanged += (s, e) => CheckHeadset();
+            Windows.Media.Devices.MediaDevice.DefaultAudioCaptureDeviceChanged += (s, e) => CheckHeadset();
+            CheckHeadset();
+        }
+
+        private async void CheckHeadset()
+        {
+            string state = "none";
+            try
+            {
+                var render = Windows.Media.Devices.MediaDevice.GetDefaultAudioRenderId(Windows.Media.Devices.AudioDeviceRole.Default);
+                var capture = Windows.Media.Devices.MediaDevice.GetDefaultAudioCaptureId(Windows.Media.Devices.AudioDeviceRole.Default);
+                var r = string.IsNullOrEmpty(render) ? null : await Windows.Devices.Enumeration.DeviceInformation.CreateFromIdAsync(render);
+                var cap = string.IsNullOrEmpty(capture) ? null : await Windows.Devices.Enumeration.DeviceInformation.CreateFromIdAsync(capture);
+                Func<Windows.Devices.Enumeration.DeviceInformation, bool> worn = d => d != null && (d.Name.IndexOf("head", StringComparison.OrdinalIgnoreCase) >= 0 || d.Name.IndexOf("earphone", StringComparison.OrdinalIgnoreCase) >= 0);
+                if (worn(r)) state = worn(cap) ? "headset" : "headset_mic_less";
+            }
+            catch (Exception e) { LunaLog.Write("[keys] headset: " + e.Message); }
+            if (state == headsetState) return;
+            bool first = headsetState == null;
+            headsetState = state;
+            if (!first || state != "none") headset.Send(J.Obj(J.P("returnValue", true), J.P("state", state)));
+        }
         private readonly CoreDispatcher dispatcher;
         private SystemMediaTransportControls smtc;
 
@@ -125,6 +165,14 @@ namespace LunaKit
 
         public void Register(Bus bus)
         {
+            bus.Register("com.palm.keys", "headset/status", c =>
+            {
+                if (!c.Subscribe) { c.Reply(NeedsSubscription); return; }
+                c.Reply(Subscribed);
+                if (c.Cancelled) return;
+                headset.Add(c);
+                WatchHeadset();
+            });
             bus.Register("com.palm.keys", "media/status", c =>
             {
                 if (!c.Subscribe) { c.Reply(NeedsSubscription); return; }
@@ -182,18 +230,122 @@ namespace LunaKit
     /// palm://com.palm.display/control/status: the screen's state. A UWP app can't see the
     /// screen itself; it sees its window hidden when the phone locks or the app leaves the
     /// front, which is what an app asking this wants to know.
+    /// palm://com.palm.display/control (AndroidLuna's DisplayService.kt): whether the screen is
+    /// on, its brightness and timeout, and webOS's display states.
+    ///
+    /// maximumBrightness is Windows' BrightnessOverride: the level Lunacy sets holds while
+    /// Lunacy is in front, and is set again at each start (Windows lets an app set brightness
+    /// only for itself). Windows gives an app no way to read or set the screen timeout: it
+    /// answers the one last set here (the TouchPad's 1800 until then), and a set says Windows
+    /// keeps its own.
     internal sealed class DisplayService
     {
+        private const string Service = "com.palm.display";
+        private readonly LunaShell shell;
         private readonly Subscribers subscribers = new Subscribers();
+        private readonly Windows.Storage.ApplicationDataContainer prefs = Windows.Storage.ApplicationData.Current.LocalSettings.CreateContainer("display", Windows.Storage.ApplicationDataCreateDisposition.Always);
         private volatile bool screenOn = true;
+
+        public DisplayService(LunaShell shell) { this.shell = shell; }
 
         public void Register(Bus bus)
         {
-            bus.Register("com.palm.display", "control/status", c =>
+            bus.Register(Service, "control/status", c =>
             {
                 c.Reply(StatusReply(c.Subscribe));
                 if (c.Subscribe && !c.Cancelled) subscribers.Add(c);
             });
+            bus.Register(Service, "control/getProperty", c => c.Reply(GetProperty(Jx.ObjOrEmpty(c.Raw))));
+            bus.Register(Service, "control/setProperty", c => SetProperty(c, Jx.ObjOrEmpty(c.Raw)));
+            bus.Register(Service, "control/setState", c => c.Reply(SetState(Jx.ObjOrEmpty(c.Raw))));
+            shell.Ui(() => { int b = Brightness(); if (Stored("maximumBrightness") >= 0) Override(b); });
+        }
+
+        private int Stored(string key) { object v; return prefs.Values.TryGetValue(key, out v) && v is int ? (int)v : -1; }
+        private int Timeout() { int t = Stored("timeout"); return t > 0 ? t : 1800; }
+
+        /// The brightness Lunacy set, or Windows' own level as the override reads it.
+        private int Brightness()
+        {
+            int b = Stored("maximumBrightness");
+            if (b >= 1) return b;
+            try
+            {
+                var o = shell.OnUi(() => BrightnessOverride.GetForCurrentView());
+                if (o.IsSupported) return Math.Max(1, Math.Min(100, (int)Math.Round(o.BrightnessLevel * 100)));
+            }
+            catch (Exception) { }
+            return 100;
+        }
+
+        private void Override(int percent)
+        {
+            try
+            {
+                var o = BrightnessOverride.GetForCurrentView();
+                if (!o.IsSupported) return;
+                o.SetBrightnessLevel(percent / 100.0, DisplayBrightnessOverrideOptions.None);
+                if (!o.IsOverrideActive) o.StartOverride();
+            }
+            catch (Exception e) { LunaLog.Write("[display] brightness: " + e.Message); }
+        }
+
+        private string GetProperty(JObj p)
+        {
+            var wanted = (p.Arr("properties") ?? new JArr()).OfType<string>().ToList();
+            if (wanted.Count == 0) wanted = new List<string> { "timeout", "maximumBrightness" };
+            var out_ = new JObj().Put("returnValue", true);
+            foreach (var name in wanted)
+            {
+                // An unknown property is left out, as the TouchPad leaves out a key it hasn't got.
+                if (name == "timeout") out_.Put("timeout", Timeout());
+                else if (name == "maximumBrightness") out_.Put("maximumBrightness", Brightness());
+            }
+            return out_.ToString();
+        }
+
+        private void SetProperty(Bus.Call c, JObj p)
+        {
+            var problems = new List<string>();
+            if (p.Has("maximumBrightness"))
+            {
+                int percent = Jx.IsNumber(p["maximumBrightness"]) ? (int)Jx.Num(p["maximumBrightness"]) : -1;
+                if (percent < 1 || percent > 100) problems.Add("maximumBrightness must be 1 to 100");
+                else
+                {
+                    bool ok = shell.OnUi(() =>
+                    {
+                        try { if (!BrightnessOverride.GetForCurrentView().IsSupported) return false; } catch (Exception) { return false; }
+                        Override(percent);
+                        return true;
+                    });
+                    if (ok) prefs.Values["maximumBrightness"] = percent;
+                    else problems.Add("Windows doesn't let Lunacy set this screen's brightness");
+                }
+            }
+            if (p.Has("timeout"))
+            {
+                int seconds = Jx.IsNumber(p["timeout"]) ? (int)Jx.Num(p["timeout"]) : 0;
+                if (seconds <= 0) problems.Add("timeout must be a number of seconds");
+                else { prefs.Values["timeout"] = seconds; problems.Add("Windows keeps the screen timeout itself: Settings > Personalization > Lock screen"); }
+            }
+            c.Reply(problems.Count == 0 ? Bus.Ok() : Bus.Error(string.Join("; ", problems)));
+        }
+
+        /// webOS's display states: Exhibition's dock and undock, and "on", which wakes the
+        /// screen (Windows' screen is on while Lunacy is in front to hear it); the others are
+        /// said plainly to be missing. LunaSysMgr ignored "on" in Exhibition.
+        private string SetState(JObj p)
+        {
+            var state = p.Str("state");
+            switch (state)
+            {
+                case "dock": shell.SetExhibition(true); return Bus.Ok();
+                case "undock": shell.SetExhibition(false); return Bus.Ok();
+                case "on": return Bus.Ok();
+                case "": return Bus.Error("state is required");
+                default: return Bus.Error("Lunacy has no display state \"" + state + "\"");
+            }
         }
 
         public void Visible(bool on)
@@ -207,110 +359,7 @@ namespace LunaKit
         private string StatusReply(bool subscribed)
         {
             return J.Obj(J.P("returnValue", true), J.P("event", "request"), J.P("state", screenOn ? "on" : "off"),
-                J.P("timeout", 1800), J.P("blockDisplay", "false"), J.P("active", screenOn), J.P("subscribed", subscribed));
-        }
-    }
-
-    /// palm://com.palm.applicationManager/open and launch, for what Windows can open: a URL (web,
-    /// mail, phone) goes to the system. Launching another webOS app by id needs the shell, which
-    /// a W10MLuna card doesn't have yet, and says so.
-    /// com.palm.applicationManager, as LunaSysMgr answered it (AndroidLuna's ApplicationManager.kt):
-    /// launch and open - an app by id (started, or brought forward with the new params), a web
-    /// page to the Web app, mailto: to Email, any other link to Windows - and the app list.
-    internal sealed class ApplicationManager
-    {
-        private const string Browser = "com.palm.app.browser";
-        private const string Email = "com.palm.app.email";
-        private readonly LunaShell shell;
-        public ApplicationManager(LunaShell shell) { this.shell = shell; }
-
-        public void Register(Bus bus)
-        {
-            Action<Bus.Call> h = c =>
-            {
-                var id = c.Params.GetString("id") ?? "";
-                var inner = c.Params.ContainsKey("params") && c.Params["params"].ValueType == Windows.Data.Json.JsonValueType.Object
-                    ? c.Params.GetNamedObject("params") : null;
-                var target = c.Params.GetString("target") ?? "";
-                if (id.Length == 0 && target.Length > 0)
-                {
-                    // webOS's command-resource-handlers: ^https?: and ^data: to the Web app,
-                    // mailto: to Email, each a card of its own.
-                    var lower = target.ToLowerInvariant();
-                    string app = (lower.StartsWith("http:") || lower.StartsWith("https:") || lower.StartsWith("data:")) ? Browser
-                        : lower.StartsWith("mailto:") ? Email : null;
-                    if (app != null && shell.Apps.Get(app) != null)
-                    {
-                        shell.Launch(app, J.Obj(J.P("target", target)), c.AppId);
-                        c.Reply(J.Obj(J.P("returnValue", true), J.P("processId", "success")));
-                        return;
-                    }
-                    Uri uri;
-                    if (Uri.TryCreate(target, UriKind.Absolute, out uri) && !uri.IsFile)
-                    {
-                        var _ = shell.Dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () =>
-                        {
-                            bool ok = await Windows.System.Launcher.LaunchUriAsync(uri);
-                            c.Reply(ok ? Bus.Ok() : Bus.Error("Windows couldn't open " + uri.Scheme + ": links"));
-                        });
-                        return;
-                    }
-                    c.Reply(Bus.Error("No handler for " + target));
-                    return;
-                }
-                if (shell.Apps.Get(id) == null) { c.Reply(Bus.Error("Application not found: " + id)); return; }
-                // An activity's callback carries "$activity" beside the params, and the
-                // application manager put it into the params the app gets (luna-sysmgr).
-                var p = inner == null ? new Windows.Data.Json.JsonObject() : Windows.Data.Json.JsonObject.Parse(inner.Stringify());
-                if (c.Params.ContainsKey("$activity")) p["$activity"] = c.Params["$activity"];
-                shell.Launch(id, inner == null && !c.Params.ContainsKey("$activity") ? "" : p.Stringify(), c.AppId);
-                c.Reply(J.Obj(J.P("returnValue", true), J.P("processId", "success")));
-            };
-            bus.Register("com.palm.applicationManager", "open", h);
-            bus.Register("com.palm.applicationManager", "launch", h);
-            bus.Register("com.palm.applicationManager", "listApps", c =>
-                c.Reply("{\"returnValue\":true,\"apps\":" + shell.Apps.Json() + "}"));
-            bus.Register("com.palm.applicationManager", "getAppInfo", c =>
-            {
-                var a = shell.Apps.Get(c.Params.GetString("appId") ?? c.Params.GetString("id"));
-                c.Reply(a == null ? Bus.Error("Application not found") : "{\"returnValue\":true,\"appInfo\":" + a.Listed().Stringify() + "}");
-            });
-            // App Catalog watches this for its install buttons (measured on the reference TouchPad:
-            // subscriptions only, {"returnValue":true,"subscribed":true} first). Installs from the
-            // catalog aren't built yet, so nothing comes or goes after that.
-            bus.Register("com.palm.applicationManager", "launchPointChanges", c =>
-            {
-                if (!c.Subscribe) { c.Reply(J.Obj(J.P("returnValue", false), J.P("subscribed", false), J.P("errorText", "Only supports subscriptions"))); return; }
-                c.Reply(J.Obj(J.P("returnValue", true), J.P("subscribed", true)));
-            });
-            // An app may change only its own launch point's icon: the caller from the bus, never
-            // from the params (Lunacy's rule 10). Calendar draws today's date on its icon.
-            bus.Register("com.palm.applicationManager", "updateLaunchPointIcon", c =>
-            {
-                var id = c.Params.GetString("launchPointId") ?? "";
-                if (id.Length == 0) { c.Reply(Bus.Error("Must provide launchPointId")); return; }
-                if (!c.Params.ContainsKey("icon")) { c.Reply(Bus.Error("Must provide icon path")); return; }
-                var app = id.EndsWith("_default", StringComparison.Ordinal) ? shell.Apps.Get(id.Substring(0, id.Length - 8)) : null;
-                if (app == null) { c.Reply(Bus.Error("Unable to update launch point's icon")); return; }
-                if (app.Id != c.AppId) { c.Reply(Bus.Error("Attempted to change another application's launch point icon")); return; }
-                var icon = (c.Params.GetString("icon") ?? "");
-                if (icon.StartsWith("file://", StringComparison.Ordinal)) icon = icon.Substring(7);
-                var basePath = "/" + AppServer.AppsPath + app.Id + "/";
-                if (icon.StartsWith(basePath, StringComparison.Ordinal)) icon = icon.Substring(basePath.Length);
-                if (icon.StartsWith("/", StringComparison.Ordinal) || icon.Contains("..") || !System.IO.File.Exists(System.IO.Path.Combine(app.Dir, icon.Replace('/', '\\'))))
-                {
-                    c.Reply(Bus.Error("Unable to update launch point's icon"));
-                    return;
-                }
-                app.Icon = icon;
-                shell.Evaluate("__lunacyShell.setIcon(" + J.Str(app.Id) + "," + J.Str(app.Url(icon)) + ")");
-                c.Reply(Bus.Ok());
-            });
-            bus.Register("com.palm.applicationManager", "getAppBasePath", c =>
-            {
-                var a = shell.Apps.Get(c.Params.GetString("appId"));
-                c.Reply(a == null ? Bus.Error("Application not found") : J.Obj(J.P("returnValue", true), J.P("basePath", "file:///" + AppServer.AppsPath + a.Id + "/" + a.Main)));
-            });
+                J.P("timeout", Timeout()), J.P("blockDisplay", "false"), J.P("active", screenOn), J.P("subscribed", subscribed));
         }
     }
 }
