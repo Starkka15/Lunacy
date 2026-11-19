@@ -105,6 +105,13 @@ namespace LunaKit
                 var top = rest.Split('/')[0];
                 file = top == "mojo" || top == "mojocommon" ? Path.Combine(assets, "fw", rest) : Path.Combine(assets, "fw", "frameworks", rest);
             }
+            else if (path.StartsWith("usr/palm/", StringComparison.Ordinal) && !path.StartsWith(AppsPath, StringComparison.Ordinal))
+            {
+                // The rest of the ROM's /usr/palm, which pages read by path, as they read the
+                // device's files: command-resource-handlers.json, ext-timezones.json.
+                root = Path.Combine(assets, "rootfs");
+                file = Path.Combine(root, path);
+            }
             else if (path.StartsWith(AppsPath, StringComparison.Ordinal))
             {
                 var rest = path.Substring(AppsPath.Length);

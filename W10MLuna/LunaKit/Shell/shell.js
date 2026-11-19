@@ -185,7 +185,11 @@
 			if (same) { return same.frame.contentWindow; }
 		}
 		var href = url || "about:blank";
-		try { var a = openerWin.document.createElement("a"); a.href = href; href = a.href; } catch (e) {}
+		// A relative URL is the opener's; one with a scheme stays as it is (EdgeHTML resolved
+		// Email's ms-local-stream: URL against the app's folder, doubling it).
+		if (!/^[a-z][a-z0-9+.\-]*:/i.test(href)) {
+			try { var a = openerWin.document.createElement("a"); a.href = href; href = a.href; } catch (e) {}
+		}
 		var kind = attrs.window === "dashboard" ? "dashboard"
 			: (attrs.window === "popupalert" || attrs.window === "emergency") ? "popupalert" : "card";
 		var win = makeWindow(opener.appId, kind, href, openerWin, name, attrs);
