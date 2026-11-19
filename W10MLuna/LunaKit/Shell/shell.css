@@ -75,9 +75,13 @@ body.maximized #dock, body.launcher #dock { transform: translateY(100%); }
 /* The launcher (Launcher.kt, phone; Docs/phone.md §2). */
 #launcher {
 	position: absolute; left: 0; top: 0; right: 0; bottom: 0; display: none;
+	z-index: 10;
 	background: url(/__lunacy/luna/images/launcher3/launcher-bg.png) repeat;
 }
 body.launcher #launcher { display: block; }
+/* The cards go while the launcher is up, as ShellChrome.kt hides its card layer: they are
+   layers of their own (will-change), which Edge draws over an unlayered launcher. */
+body.launcher #cards { visibility: hidden; }
 #tabs { position: absolute; left: 0; right: 0; top: 0; height: 40px; overflow: hidden; }
 #tabs-row { position: absolute; left: 0; top: 0; height: 40px; white-space: nowrap; transition: transform 250ms ease-in; }
 .tab {
