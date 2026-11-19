@@ -262,6 +262,8 @@ namespace LunaKit
                 case ".htm":
                 {
                     if (shell) return data;
+                    // Each page an app loads, its frames' included, which have no window to log them.
+                    if (!resource) LunaLog.Write("[LunaKit] page /" + name + (appId == null ? "" : " (" + appId + ")"));
                     var html = HtmlTransforms.SelfClosingTags(Decode(data));
                     return Encoding.UTF8.GetBytes(resource || appId == null ? html : Inject(JsTransforms.SloppyMode(html), appId));
                 }

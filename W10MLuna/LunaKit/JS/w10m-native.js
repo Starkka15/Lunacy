@@ -150,6 +150,7 @@
 			var tag = el.tagName;
 			if (tag !== "IFRAME" && tag !== "IMG") { return; }
 			var u = el.getAttribute("src");
+			if (tag === "IFRAME" && u) { H.log(W, "iframe src: " + u.split("?")[0]); }
 			if (!u || u.slice(0, 8).toLowerCase() !== "file:///" || !window.__lunacyPageUrl) { return; }
 			var m = window.__lunacyPageUrl(u);
 			if (m === u) { return; }
