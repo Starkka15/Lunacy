@@ -59,6 +59,9 @@
     <Compile Include="Log.cs" />
     <Compile Include="LunaShell.cs" />
     <Compile Include="LunacyService.cs" />
+    <Compile Include="Jx.cs" />
+    <Compile Include="Db8.cs" />
+    <Compile Include="Configurator.cs" />
     <Compile Include="NetShim.cs" />
     <Compile Include="Services.cs" />
     <Compile Include="Sqlite.cs" />

@@ -55,12 +55,22 @@ namespace LunaKit
             display.Register(Bus);
             new ApplicationManager(this).Register(Bus);
             new LunacyService(this).Register(Bus);
+            Rom = Path.Combine(assets, "rootfs");
+            Db = new Db8("com.palm.db", Path.Combine(ApplicationData.Current.LocalFolder.Path, "db8.sqlite"));
+            Db.Register(Bus);
+            TempDb = new Db8("com.palm.tempdb", null);
+            TempDb.Register(Bus);
         }
+
+        /// The webOS root's read-only part (assemble-assets.ps1: the ROM's /usr/palm and /etc).
+        internal readonly string Rom;
+        internal readonly Db8 Db, TempDb;
 
         /// Shows the shell. On the UI thread.
         public void Start()
         {
             Apps.Scan();
+            new Configurator(Apps, Db, TempDb, Rom, Bus).Run();
             Measure();
             LunaLog.Write("[LunaKit] shell starting as " + Profile.Name + " " + deviceInfo);
             Windows.UI.Xaml.Window.Current.VisibilityChanged += (s, e) => display.Visible(e.Visible);

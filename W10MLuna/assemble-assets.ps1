@@ -22,11 +22,19 @@ Where Enyo 1.0 comes from; by default a webos-sdk-redux clone beside this reposi
 
 .PARAMETER Version
 The package's version.
+
+.PARAMETER Apk
+An AndroidLuna release APK, whose ROM (assets/rootfs) gives webos\rootfs\ its /usr/palm (Palm's
+service frameworks and the system's JS services) and /etc (db8's system kinds, activities): what
+fetch-assets.sh copies off the reference TouchPad, which isn't in git. The ROM's native
+binaries wait for the PDK runtime (SHELL.md). By default $env:LUNACY_APK, else the 0.9.7 release
+beside the Android checkout.
 #>
 param(
     [string[]]$App = @(),
     [string]$Enyo,
-    [string]$Version = '0.2.0.0'
+    [string]$Version = '0.2.0.0',
+    [string]$Apk = $(if ($env:LUNACY_APK) { $env:LUNACY_APK } else { 'H:\Lunacy\AndroidLuna\local-build\release-0.9.7\AndroidLuna-arm64-release.apk' })
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -51,6 +59,21 @@ Copy-Item (Join-Path $assets 'luna\*.json') (Join-Path $dest 'luna')
 Copy-Item -Recurse (Join-Path $assets 'luna\fonts') (Join-Path $dest 'fonts')
 New-Item -ItemType Directory -Force (Join-Path $dest 'fw\enyo') | Out-Null
 Copy-Item -Recurse $Enyo (Join-Path $dest 'fw\enyo\1.0')
+
+# The ROM's /usr/palm and /etc, from the APK.
+if (-not (Test-Path $Apk)) { throw "assemble-assets: no AndroidLuna APK at $Apk (pass -Apk)" }
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [IO.Compression.ZipFile]::OpenRead($Apk)
+$romFiles = 0
+try {
+    foreach ($e in $zip.Entries) {
+        if ($e.FullName -notmatch '^assets/rootfs/((usr/palm|etc)/.+)$' -or $e.FullName.EndsWith('/')) { continue }
+        $out = Join-Path $dest ('rootfs\' + ($Matches[1] -replace '/', '\'))
+        New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
+        [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true)
+        $romFiles++
+    }
+} finally { $zip.Dispose() }
 
 # The apps, each in a folder named by its id.
 $folders = @(Get-ChildItem (Join-Path $repo 'CoreApps') -Directory | ForEach-Object FullName) + @($App | ForEach-Object { (Resolve-Path $_).Path })
@@ -99,4 +122,4 @@ foreach ($t in @(@('Square150x150Logo', 150, 150), @('Square44x44Logo', 44, 44),
     $bmp.Dispose()
 }
 $icon.Dispose()
-Write-Host "assemble-assets: Lunacy $Version with $($ids.Count) apps laid out in $host_"
+Write-Host "assemble-assets: Lunacy $Version with $($ids.Count) apps and $romFiles ROM files laid out in $host_"
