@@ -180,6 +180,20 @@
 		if (win.active) { deliverActive(win); } else { win.told = false; }
 	}
 
+	// Takes a closed window's node off the page once its document is gone. Removing a frame
+	// whose page still runs leaves that page's mutation observers firing on a dead window, and
+	// EdgeHTML throws "Object expected" from the first call they make (engine.js's layout pass,
+	// at every card close). So the node is hidden at once, its frame goes to about:blank, which
+	// unloads the page and its observers with it, and the node goes when that has loaded.
+	function detach(node, frame) {
+		if (!node || !node.parentNode) { return; }
+		node.style.display = "none";
+		var done = false;
+		function remove() { if (done) { return; } done = true; if (node.parentNode) { node.parentNode.removeChild(node); } }
+		try { frame.addEventListener("load", remove); frame.src = "about:blank"; } catch (e) { remove(); return; }
+		setTimeout(remove, 2000);
+	}
+
 	function closeWindow(id, quiet) {
 		var win = windows[id];
 		if (!win) { return; }
@@ -189,12 +203,12 @@
 			var i = cards.indexOf(id);
 			if (i >= 0) { cards.splice(i, 1); }
 			if (maximized === id) { maximized = null; }
-			win.box.parentNode.removeChild(win.box);
+			detach(win.box, win.frame);
 			if (focusIndex >= cards.length) { focusIndex = Math.max(0, cards.length - 1); }
 		} else if (win.type === "hidden" || win.type === "service") {
-			win.frame.parentNode.removeChild(win.frame);
+			detach(win.frame, win.frame);
 		} else {
-			win.box.parentNode.removeChild(win.box);
+			detach(win.box, win.frame);
 		}
 		H.windowClosed(id);
 		log("closed " + win.type + " " + id + " " + win.appId);
