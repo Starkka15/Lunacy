@@ -27,14 +27,14 @@ The package's version.
 An AndroidLuna release APK, whose ROM (assets/rootfs) gives webos\rootfs\ its /usr/palm (Palm's
 service frameworks and the system's JS services) and /etc (db8's system kinds, activities): what
 fetch-assets.sh copies off the reference TouchPad, which isn't in git. The ROM's native
-binaries wait for the PDK runtime (SHELL.md). By default $env:LUNACY_APK, else the 0.9.7 release
+binaries wait for the PDK runtime (SHELL.md). By default $env:LUNACY_APK, else the 1.1.0 release
 beside the Android checkout.
 #>
 param(
     [string[]]$App = @(),
     [string]$Enyo,
     [string]$Version = '0.2.0.0',
-    [string]$Apk = $(if ($env:LUNACY_APK) { $env:LUNACY_APK } else { 'H:\Lunacy\AndroidLuna\local-build\release-0.9.7\AndroidLuna-arm64-release.apk' })
+    [string]$Apk = $(if ($env:LUNACY_APK) { $env:LUNACY_APK } else { 'H:\Lunacy\AndroidLuna\local-build\release-1.1.0\AndroidLuna-arm64-release.apk' })
 )
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
