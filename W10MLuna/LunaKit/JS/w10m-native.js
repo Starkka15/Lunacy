@@ -103,6 +103,18 @@
 	window.open = function (url, name, features) { return Shell.open(W, window, s(url), s(name), s(features)); };
 	if (root) { window.close = function () { Shell.close(W); }; }
 
+	// A card's frame is removed when it closes, and its page's last mutation observers still
+	// fire: EdgeHTML then throws "Object expected" from requestAnimationFrame on the detached
+	// window (engine.js's layout pass, at every card close). A frame that is gone asks for
+	// nothing; any other failure is still thrown.
+	var raf0 = window.requestAnimationFrame;
+	if (raf0) {
+		window.requestAnimationFrame = function (f) {
+			try { return raf0.call(window, f); }
+			catch (e) { var gone = true; try { gone = !window.frameElement || !window.frameElement.parentNode; } catch (x) {} if (gone) { return 0; } throw e; }
+		};
+	}
+
 	// On webOS a card was its own top window; here top is the shell's page. Enyo finds its app's
 	// root window as opener || rootWindow || top, and when the root goes it hands the role on by
 	// setting the new root's rootWindow to null: so an empty rootWindow means this window, never
