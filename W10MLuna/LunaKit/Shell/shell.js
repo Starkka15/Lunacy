@@ -133,7 +133,10 @@
 		else { box = $("hidden"); }
 		win.box = box;
 		var frame = document.createElement("iframe");
-		frame.name = "lunacy-window-" + id;
+		// The window's own name, as window.open gave it (a browser names the new window by its
+		// target): Mojo keys a stage's callback by it, and a card named for the shell left the
+		// app's scene never pushed (SimpleChat's white card). A launched window has none.
+		frame.name = name || "";
 		frame.src = url;
 		win.frame = frame;
 		windows[id] = win;
