@@ -54,6 +54,7 @@ namespace LunaKit
             new Keys(Dispatcher).Register(Bus);
             display.Register(Bus);
             new ApplicationManager(this).Register(Bus);
+            new LunacyService(this).Register(Bus);
         }
 
         /// Shows the shell. On the UI thread.
@@ -130,11 +131,12 @@ namespace LunaKit
         internal string ShellInfo()
         {
             return J.Obj(J.P("phone", Profile.Name == "PRE3"), J.P("layoutWidth", FixedViewport.LayoutWidth),
-                J.P("zoomApps", new J.Raw("[" + string.Join(",", FixedViewport.DefaultIds.Select(J.Str)) + "]")),
+                J.P("zoomApps", new J.Raw("[" + string.Join(",", FixedViewport.OnIds(Apps.All()).Select(J.Str)) + "]")),
                 J.P("apps", new J.Raw(Apps.Json())));
         }
 
         internal string Orientation { get { return orientation; } }
+        internal int ProcessId { get { return pid; } }
         internal string Origin { get { return origin; } }
 
         // MARK: windows

@@ -135,6 +135,23 @@ namespace LunaKit
             }
         }
 
+        /// "user" when the id is one the user carried over from a TouchPad (Device Info), else
+        /// "install": the one made for this install.
+        public static string NduidSource
+        {
+            get { return ApplicationData.Current.LocalSettings.Values["LunaKit.nduidSource"] as string ?? "install"; }
+        }
+
+        /// Device Info's device id: one carried over (40 hex digits), or null for a new one of
+        /// this install's own.
+        public static void SetNduid(string id)
+        {
+            var settings = ApplicationData.Current.LocalSettings.Values;
+            if (id == null) { settings.Remove("LunaKit.nduid"); settings.Remove("LunaKit.nduidSource"); return; }
+            settings["LunaKit.nduid"] = id.ToLowerInvariant();
+            settings["LunaKit.nduidSource"] = "user";
+        }
+
         /// A serial in HP's shape, derived from the device id (not a copy of a real one).
         public string Serial
         {

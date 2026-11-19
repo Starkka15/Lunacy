@@ -58,6 +58,7 @@
     <Compile Include="Json.cs" />
     <Compile Include="Log.cs" />
     <Compile Include="LunaShell.cs" />
+    <Compile Include="LunacyService.cs" />
     <Compile Include="NetShim.cs" />
     <Compile Include="Services.cs" />
     <Compile Include="Sqlite.cs" />

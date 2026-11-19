@@ -50,7 +50,11 @@
 		return 0;
 	}
 
-	function isZoomed(appId) { return info.phone && zoomApps[appId]; }
+	function isZoomed(appId) { return info.phone && info.layoutWidth > 0 && zoomApps[appId]; }
+	// Device Info's switches (Lunacy's system/setFixedViewport and system/setLayout): the
+	// windows open now take the change at once.
+	function setZoom(appId, on) { zoomApps[appId] = Boolean(on); layoutAll(); }
+	function setLayoutWidth(w) { info.layoutWidth = Number(w) || 0; layoutAll(); }
 
 	// The window's frame laid out at its box's size, or for a TouchPad app on a phone wider and
 	// scaled down to fit (Phone Zoom, AndroidLuna's fixed viewport: the shorter side
@@ -555,6 +559,8 @@
 
 	window.__lunacyShell = {
 		windowOf: windowOf,
+		setZoom: setZoom,
+		setLayoutWidth: setLayoutWidth,
 		open: openWindow,
 		close: function (id) { closeWindow(id); },
 		nextWindow: function (attrs) { try { pendingAttributes = JSON.parse(attrs || "{}"); } catch (e) { pendingAttributes = {}; } },
