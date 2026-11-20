@@ -72,7 +72,14 @@ namespace LunaKit
 
         /// First Use and the setup page's question: Windows has no dialog for these, only its
         /// privacy settings, so asking is opening the store and seeing whether it answers.
-        public async Task<bool> Request() { bool ok; try { ok = await Open(); } catch (Exception) { ok = false; } SetGranted(ok); return ok; }
+        public async Task<bool> Request()
+        {
+            bool ok;
+            try { ok = await Open(); if (!ok) LunaLog.Write("[" + Name + "] Windows gave no store"); }
+            catch (Exception e) { ok = false; LunaLog.Write("[" + Name + "] Windows refused: " + e.GetType().Name + ": " + e.Message); }
+            SetGranted(ok);
+            return ok;
+        }
 
         protected void RegisterAccount(Bus bus, string enabledMethod, string deleteMethod)
         {

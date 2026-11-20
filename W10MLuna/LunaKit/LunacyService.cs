@@ -148,6 +148,16 @@ namespace LunaKit
             return known && a != null && !a.Removable;
         }
 
+        /// An account's setup page runs inside the app that is adding the account, and calls the bus
+        /// as that app (LunacyService.kt's hostsAccountPages): the Windows account's page asks for
+        /// contacts and calendars through bundled Contacts, Calendar or Accounts.
+        private static readonly HashSet<string> AccountPageHosts = new HashSet<string> { "com.palm.app.contacts", "com.palm.app.calendar", "com.palm.app.accounts" };
+        private bool HostsAccountPages(string appId)
+        {
+            var a = shell.Apps.Get(appId);
+            return AccountPageHosts.Contains(appId) && a != null && !a.Removable;
+        }
+
         private void Own(Bus bus, string method, string what, Action<Bus.Call> h)
         {
             bus.Register(Service, method, c =>
@@ -206,7 +216,7 @@ namespace LunaKit
         private void RequestPermission(Bus.Call c)
         {
             var which = c.Params.GetString("permission") ?? "";
-            if (!OwnApp(c.AppId)) { c.Reply(Bus.Error("Only Lunacy's own apps can ask for Windows' permissions (asked by " + c.AppId + ")", -1)); return; }
+            if (!OwnApp(c.AppId) && !((which == "contacts" || which == "calendar") && HostsAccountPages(c.AppId))) { c.Reply(Bus.Error("Only Lunacy's own apps can ask for Windows' permissions (asked by " + c.AppId + ")", -1)); return; }
             bool viaSettings = c.Params.GetBool("viaSettings");
             switch (which)
             {
