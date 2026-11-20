@@ -26,6 +26,34 @@
 	var W = Shell.windowOf(window);
 	var root = window.parent === T;   // this window's own page, not a frame inside it
 
+	// EdgeHTML won't navigate to a URL longer than 2083 characters, and gives no error: the
+	// frame stays on about:blank. webOS pages pass state in the query - Enyo's
+	// ?enyoWindowParams=<JSON> for a CrossAppUI frame or a window it opens, which carries a whole
+	// account template (Calendar's Windows account page, about 2200 characters). So a long
+	// query is kept with the shell and the URL carries a token (shortUrl); the page it opens puts
+	// the query back into its address here, before Enyo reads enyo.args from it.
+	var LONG = "__lunacyLong", LIMIT = 2000;
+	(function () {
+		var m = /[?&]__lunacyLong=([0-9]+)/.exec(location.search);
+		if (!m) { return; }
+		var store = T.__lunacyLongQueries || {}, q = store[m[1]];
+		delete store[m[1]];
+		if (typeof q !== "string") { return; }
+		try { history.replaceState(history.state, "", location.pathname + q + location.hash); }
+		catch (e) { try { H.log(Shell.windowOf(window), "long query not restored: " + e.message); } catch (x) {} }
+	})();
+	function shortUrl(u) {
+		u = String(u || "");
+		if (u.length <= LIMIT) { return u; }
+		var q = u.indexOf("?"), h = u.indexOf("#", q < 0 ? 0 : q);
+		if (q < 0) { return u; }
+		var query = h < 0 ? u.slice(q) : u.slice(q, h), hash = h < 0 ? "" : u.slice(h);
+		var store = T.__lunacyLongQueries || (T.__lunacyLongQueries = {});
+		var token = String((T.__lunacyLongNext = (T.__lunacyLongNext || 0) + 1));
+		store[token] = query;
+		return u.slice(0, q) + "?" + LONG + "=" + token + hash;
+	}
+
 	// The device's user agent, as Android sets its WebView's (AppWindow.kt): webOS apps tell
 	// webOS from elsewhere by it (hpwOS/3, webOS/2), App Catalog among them. A UWP WebView's
 	// navigator.userAgent can't be set from the host, so it is defined here, on the navigator
@@ -125,7 +153,7 @@
 	// window.open and window.close are the shell's: a webOS window is a frame of its page, made
 	// and handed back at once, as webOS handed an app the window it opened. bridge.js wraps this
 	// open to pass the window's attributes first (N.nextWindow).
-	window.open = function (url, name, features) { return Shell.open(W, window, s(url), s(name), s(features)); };
+	window.open = function (url, name, features) { return Shell.open(W, window, shortUrl(s(url)), s(name), s(features)); };
 	if (root) { window.close = function () { Shell.close(W); }; }
 
 	// A card's frame is removed when it closes, and its page's last mutation observers still
@@ -150,6 +178,13 @@
 			var tag = el.tagName;
 			if (tag !== "IFRAME" && tag !== "IMG") { return; }
 			var u = el.getAttribute("src");
+			if (tag === "IFRAME" && u && u.length > LIMIT) {
+				var su = shortUrl(window.__lunacyPageUrl ? window.__lunacyPageUrl(u) : u);
+				H.log(W, "iframe URL of " + u.length + " characters shortened: " + su);
+				el.setAttribute("src", su);
+				if (el.getAttribute("src") !== su) { el.src = su; }
+				return;
+			}
 			if (tag === "IFRAME" && u) {
 				var inDoc = document.documentElement.contains(el);
 				H.log(W, "iframe src: " + u.split("?")[0] + (inDoc ? " (in the page, " + el.offsetWidth + "x" + el.offsetHeight + ")" : " (not in the page)"));
