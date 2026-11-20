@@ -48,8 +48,18 @@
 	// A touch that starts on its popup or handles is its own and the page never hears of it.
 	var edit = null, editTouch = false;
 	function E() { return edit || (edit = window.__lunacyEdit || null); }
+	// A press the page loses before the finger lifts - a second finger making it a pinch, or a
+	// touchend that never came - ends as LunaSysMgr's PenCancel did: a mouseup off the page.
+	// Dropped without one, Enyo still held the mouse down (its mousehold job running), and the
+	// next touch's mousedown threw "re-entrant startMousehold" (Photos, pinching a picture).
+	function cancelPress() {
+		if (!st) { return; }
+		st = null;
+		fire("mouseup", { screenX: -10000, screenY: -10000, clientX: -10000, clientY: -10000 }, document);
+	}
 	document.addEventListener("touchstart", function (ev) {
-		if (ev.touches.length > 1) { st = null; if (E()) { E().moved(); } return; }  // leave multi-touch (pinch) alone
+		if (ev.touches.length > 1) { cancelPress(); if (E()) { E().moved(); } return; }  // leave multi-touch (pinch) alone
+		cancelPress();
 		var t = ev.changedTouches[0];
 		if (E() && E().owns(t)) {
 			st = null; editTouch = true;
