@@ -97,7 +97,16 @@ namespace LunaKit
 
         public IAsyncOperation<IInputStream> UriToStreamAsync(Uri uri)
         {
-            return Serve(uri).AsAsyncOperation();
+            return Logged(uri).AsAsyncOperation();
+        }
+
+        /// Serve, with any failure but a missing file in the log: the WebView shows a frame whose
+        /// request failed as blank and says nothing.
+        private async Task<IInputStream> Logged(Uri uri)
+        {
+            try { return await Serve(uri).ConfigureAwait(false); }
+            catch (FileNotFoundException) { throw; }
+            catch (Exception e) { LunaLog.Write("[LunaKit] serving " + uri.AbsolutePath + " failed: " + e.GetType().Name + ": " + e.Message); throw; }
         }
 
         private async Task<IInputStream> Serve(Uri uri)

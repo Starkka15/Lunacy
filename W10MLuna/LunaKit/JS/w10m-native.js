@@ -150,7 +150,16 @@
 			var tag = el.tagName;
 			if (tag !== "IFRAME" && tag !== "IMG") { return; }
 			var u = el.getAttribute("src");
-			if (tag === "IFRAME" && u) { H.log(W, "iframe src: " + u.split("?")[0]); }
+			if (tag === "IFRAME" && u) {
+				var inDoc = document.documentElement.contains(el);
+				H.log(W, "iframe src: " + u.split("?")[0] + (inDoc ? " (in the page, " + el.offsetWidth + "x" + el.offsetHeight + ")" : " (not in the page)"));
+				setTimeout(function () {
+					var what;
+					try { var d = el.contentDocument; what = d ? d.readyState + " " + d.location.href.split("?")[0] + ", " + (d.body ? d.body.innerHTML.length : -1) + " chars" : "no document"; }
+					catch (e) { what = "not readable: " + e.message; }
+					H.log(W, "iframe after 2 s: " + (document.documentElement.contains(el) ? "in the page, " + el.offsetWidth + "x" + el.offsetHeight : "not in the page") + "; " + what);
+				}, 2000);
+			}
 			if (!u || u.slice(0, 8).toLowerCase() !== "file:///" || !window.__lunacyPageUrl) { return; }
 			var m = window.__lunacyPageUrl(u);
 			if (m === u) { return; }
