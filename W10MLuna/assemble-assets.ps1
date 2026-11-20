@@ -121,6 +121,18 @@ foreach ($rel in @('fw\enyo\1.0\framework\build\enyo-build.js', 'fw\enyo\1.0\fra
     if ($u -ne $t) { [IO.File]::WriteAllText($f, $u, (New-Object Text.UTF8Encoding($false))) } else { Write-Warning "assemble-assets: Enyo's makeAbsoluteUrl not found in $rel" }
 }
 
+# Enyo's launch arguments come from location.search. A page opened with a query too long for
+# EdgeHTML (over 2083 characters: a CrossAppUI frame's ?enyoWindowParams=, which carries a whole
+# account template) gets a short URL, and w10m-native.js keeps the real query in
+# window.__lunacyLongQuery, since history.replaceState can't take it either. enyo.js reads it
+# from there when it is set.
+$f = Join-Path $dest 'fw\enyo\1.0\framework\enyo.js'
+if (Test-Path $f) {
+    $t = [IO.File]::ReadAllText($f)
+    $u = $t.Replace('parseUrlArgs(location.search.slice(1));', 'parseUrlArgs((window.__lunacyLongQuery || location.search).slice(1));')
+    if ($u -ne $t) { [IO.File]::WriteAllText($f, $u, (New-Object Text.UTF8Encoding($false))) } else { Write-Warning "assemble-assets: enyo.js's argument parsing not found" }
+}
+
 # Mojo, the same: it finds the app's folder and its host from the page's URL, taking it as
 # file:/// or http(s):// (Mojo._calculateAppRootPath, the hosting prefix, mojo.core's App.path).
 # W10M serves every page from ms-local-stream:, so Mojo.appPath was undefined and the framework

@@ -39,8 +39,10 @@
 		var store = T.__lunacyLongQueries || {}, q = store[m[1]];
 		delete store[m[1]];
 		if (typeof q !== "string") { return; }
-		try { history.replaceState(history.state, "", location.pathname + q + location.hash); }
-		catch (e) { try { H.log(Shell.windowOf(window), "long query not restored: " + e.message); } catch (x) {} }
+		// For the page's own readers: enyo.js takes its arguments from here (assemble-assets'
+		// patch). The address itself can't take it back: replaceState has the same limit.
+		window.__lunacyLongQuery = q;
+		try { history.replaceState(history.state, "", location.pathname + q + location.hash); } catch (e) {}
 	})();
 	function shortUrl(u) {
 		u = String(u || "");
@@ -168,6 +170,21 @@
 		};
 	}
 
+	// EdgeHTML throws "Unspecified error" reading document.activeElement in a frame where nothing
+	// has focus; every other engine answers the body (or null before there is one). Enyo's
+	// findFocusedScroller and input.js's keepVisible read it on every resize and focus change,
+	// so each frame threw them (Calendar, its account frame).
+	(function () {
+		var P = window.Document && Document.prototype, d = P && Object.getOwnPropertyDescriptor(P, "activeElement");
+		if (!d || !d.get) { return; }
+		try {
+			Object.defineProperty(P, "activeElement", {
+				configurable: true, enumerable: d.enumerable,
+				get: function () { try { return d.get.call(this); } catch (e) { return this.body || null; } }
+			});
+		} catch (e) { H.log(W, "activeElement not wrapped: " + e.message); }
+	})();
+
 	// A file:// URL that reaches a frame or an image without passing media.js's src hooks (in
 	// markup, or where EdgeHTML's own src accessor won't take the hook) names nothing on
 	// ms-local-stream, and the frame stays blank: Calendar's Windows account page, which Enyo's
@@ -222,12 +239,16 @@
 	// On webOS a card was its own top window; here top is the shell's page. Enyo finds its app's
 	// root window as opener || rootWindow || top, and when the root goes it hands the role on by
 	// setting the new root's rootWindow to null: so an empty rootWindow means this window, never
-	// the shell.
-	if (root) {
+	// the shell. A frame inside a card (Enyo's CrossAppUI) had that card as its top, so its
+	// rootWindow is the card's window: Enyo's getWindows read enyo.windows off the shell and
+	// threw, and the frame's Enyo never finished starting.
+	var home = window;
+	try { while (home.parent && home.parent !== T && home.parent !== home) { home = home.parent; } } catch (e) { home = window; }
+	{
 		var rootWin = null;
 		try {
 			Object.defineProperty(window, "rootWindow", {
-				get: function () { return rootWin || window; },
+				get: function () { return rootWin || home; },
 				set: function (v) { rootWin = v || null; },
 				configurable: true
 			});
