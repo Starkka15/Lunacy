@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace LunaKit
 {
@@ -217,7 +219,42 @@ namespace LunaKit
                 case "exit":
                     Stop(p, "exited (" + m.Long("code") + ")");
                     break;
+                case "extractfs":
+                    Extract(p, m.Str("id"), m.Str("spec"));
+                    break;
             }
+        }
+
+        private int extracted;
+        private static readonly SemaphoreSlim thumbnailer = new SemaphoreSlim(1, 1);
+
+        /// A service reads extractfs (Extractfs), which on webOS was a filesystem it could cp from
+        /// or stream: host.js asks for the file first, and is given a webOS path where it now is
+        /// (JsServices.kt's extractfs). A few are kept, each overwriting the oldest, since each is
+        /// read once, straight away. Made one at a time, off the UI thread; null where the
+        /// device's read failed.
+        private void Extract(Proc p, string id, string spec)
+        {
+            Task.Run(async () =>
+            {
+                string path = null;
+                await thumbnailer.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    var r = await Extractfs.Read(spec, f => { try { return fs.IsDir(f) ? null : fs.Read(f); } catch (WebosFs.FsError) { return null; } }).ConfigureAwait(false);
+                    if (r == null) LunaLog.Write("[services] extractfs: no image for " + spec);
+                    else
+                    {
+                        var made = "/tmp/extractfs/" + (Interlocked.Increment(ref extracted) % 16);
+                        try { fs.MakeDir("/tmp/extractfs", true); fs.Write(made, r.Bytes, false); path = made; }
+                        catch (Exception e) { LunaLog.Write("[services] extractfs: " + e.Message); }
+                    }
+                }
+                finally { thumbnailer.Release(); }
+                var reply = new JObj().Put("t", "extractfs").Put("id", id);
+                if (path != null) reply.Put("path", path);
+                Send(p, reply.ToString());
+            });
         }
 
         private void Stop(Proc p, string why)

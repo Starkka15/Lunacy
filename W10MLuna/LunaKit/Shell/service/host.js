@@ -99,6 +99,9 @@
 			h.emit("request", new Message(m));
 		} else if (m.t === "cancel") {
 			handles.slice().forEach(function (x) { x.emit("cancel", new Message(m)); });
+		} else if (m.t === "extractfs") {
+			var cb = extracting[m.id];
+			if (cb) { delete extracting[m.id]; cb(m.path || null); }
 		} else if (m.t === "callResponse") {
 			var r = outgoing[m.id];
 			if (r) {
@@ -113,12 +116,95 @@
 		}
 	};
 
+	// ---- extractfs ----
+	// webOS's thumbnailer was a filesystem, /var/luna/data/extractfs<image>:<size...>, that
+	// services read like any file (the photos service streams its JSON and cp's its JPEGs).
+	// Lunacy makes the file on request, off the UI thread (JsServices.Extract, Extractfs.kt on
+	// Android): a read of one waits for it, then reads the copy. A read the device would have
+	// failed fails as it did there. AndroidLuna's host.js does the same.
+	var EXTRACTFS = "/var/luna/data/extractfs";
+	var extracting = {}, nextExtract = 1;
+	function isExtractfs(p) { return typeof p === "string" && p.indexOf(EXTRACTFS) === 0; }
+	function extract(p, cb) {
+		var id = "x" + nextExtract++;
+		extracting[id] = cb;
+		send({ t: "extractfs", id: id, spec: p.slice(EXTRACTFS.length) });
+	}
+	function noEntry(p) {
+		var e = new Error("ENOENT: no such file or directory, open '" + p + "'");
+		e.code = "ENOENT"; e.errno = -2; e.path = p;
+		return e;
+	}
+	(function () {
+		var xfs = N.core.fs, cp = N.core.child_process, EventEmitter = N.core.events, PassThrough = N.core.stream.PassThrough;
+		var createReadStream0 = xfs.createReadStream, readFile0 = xfs.readFile;
+		xfs.createReadStream = function (p, opts) {
+			if (!isExtractfs(p)) { return createReadStream0.apply(xfs, arguments); }
+			var out = new PassThrough();
+			var enc = typeof opts === "string" ? opts : opts && opts.encoding;
+			if (enc) { out.setEncoding(enc); }
+			out.destroy = function () {};
+			extract(p, function (made) {
+				if (!made) { out.emit("error", noEntry(p)); return; }
+				createReadStream0.call(xfs, made).on("error", function (e) { out.emit("error", e); }).pipe(out);
+			});
+			return out;
+		};
+		xfs.readFile = function (p) {
+			var a = Array.prototype.slice.call(arguments);
+			if (!isExtractfs(p)) { return readFile0.apply(xfs, a); }
+			var cb = a[a.length - 1];
+			extract(p, function (made) { if (made) { a[0] = made; readFile0.apply(xfs, a); } else { cb(noEntry(p)); } });
+		};
+		// A child process given an extractfs file starts once the file is there; one whose file
+		// can't be made fails as cp did on the device.
+		function withExtracts(args, start) {
+			var wanted = (args || []).filter(isExtractfs);
+			if (!wanted.length) { return start(args); }
+			var child = new EventEmitter();
+			child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+			child.kill = function (sig) { child.killed = true; if (child.real) { child.real.kill(sig); } };
+			var made = {}, left = wanted.length, failed = false;
+			function go() {
+				if (child.killed) { return; }
+				if (failed) {
+					child.stderr.end("cp: read error: No such file or directory\n"); child.stdout.end();
+					setImmediate(function () { child.emit("exit", 1, null); child.emit("close", 1, null); });
+					return;
+				}
+				var real = child.real = start(args.map(function (a) { return made[a] || a; }));
+				child.pid = real.pid;
+				if (real.stdout) { real.stdout.pipe(child.stdout); }
+				if (real.stderr) { real.stderr.pipe(child.stderr); }
+				if (real.stdin) { child.stdin.pipe(real.stdin); }
+				["exit", "close", "error"].forEach(function (ev) {
+					real.on(ev, function () { child.emit.apply(child, [ev].concat(Array.prototype.slice.call(arguments))); });
+				});
+			}
+			wanted.forEach(function (p) {
+				extract(p, function (m) { if (m) { made[p] = m; } else { failed = true; } if (--left === 0) { go(); } });
+			});
+			return child;
+		}
+		var spawn0 = cp.spawn, execFile0 = cp.execFile;
+		cp.spawn = function (file, args, opts) {
+			if (!Array.isArray(args)) { return spawn0.apply(cp, arguments); }
+			return withExtracts(args, function (a) { return spawn0.call(cp, file, a, opts); });
+		};
+		cp.execFile = function (file, args, opts, cb) {
+			if (!Array.isArray(args)) { return execFile0.apply(cp, arguments); }
+			return withExtracts(args, function (a) { return execFile0.call(cp, file, a, opts, cb); });
+		};
+	}());
+
 	// ---- webos: include and the MojoLoader require ----
 
 	var fs = N.core.fs;
 	var webos = {
 		// A file in the service's global scope (sources.json "source" entries).
 		include: function (p) {
+			// Trace: which source a service that never gets ready is stuck in.
+			N.hostLog("info", "include " + p);
 			N.runIn(window, fs.readFileSync(p, "utf8"), require("path").resolve(p));
 		},
 		// A MojoLoader library: its files share a fresh context (a frame) holding MojoLoader,

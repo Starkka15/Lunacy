@@ -1518,8 +1518,11 @@
 
 	// A strict file's top-level declarations stay in its eval; webOS's sources declared their
 	// globals at the top of files node ran as scripts, so the directive is put out of the way.
+	// A comment ends at its first "*/": a lazy [\s\S]*? could also span to a later one, and a
+	// run of /*global*/ lines then backtracked exponentially (the photos service's Sync-Manager.js
+	// never finished loading).
 	function sloppy(code) {
-		return code.replace(/^﻿?#![^\n]*/, "").replace(/^((?:\s|\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)*)(["'])use strict\2/, "$1$2not strict$2");
+		return code.replace(/^﻿?#![^\n]*/, "").replace(/^((?:\s|\/\/[^\n]*\n|\/\*(?:[^*]|\*+[^*\/])*\*+\/)*)(["'])use strict\2/, "$1$2not strict$2");
 	}
 	function runIn(win, code, filename) {
 		return win.eval(sloppy(String(code)) + "\n//# sourceURL=" + (filename || "evalmachine.<anonymous>").replace(/\s/g, "%20"));

@@ -87,7 +87,7 @@ namespace LunaKit
     internal static class JsTransforms
     {
         private static readonly Regex Directive = new Regex(
-            "((?:^|[{};>])(?:\\s|/\\*[\\s\\S]*?\\*/|//[^\\n]*\\n)*)([\"'])use strict\\2");
+            "((?:^|[{};>])(?:\\s|/\\*(?:[^*]|\\*+[^*/])*\\*+/|//[^\\n]*\\n)*)([\"'])use strict\\2");
 
         /// `"use strict"` does nothing, as on the device (WebKit 534.6 predates strict mode).
         public static string SloppyMode(string js)

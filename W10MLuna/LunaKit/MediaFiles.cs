@@ -62,8 +62,10 @@ namespace LunaKit
             var paths = new HashSet<string>(StringComparer.Ordinal);
             var mapped = user.Mapped.ToList();
             var roots = mapped.Select(m => m.Value.Path.TrimEnd('\\')).Where(p => p.Length > 0).ToList();
-            Func<string, bool> nested = p => roots.Any(r => !string.Equals(r, p, StringComparison.OrdinalIgnoreCase)
-                && p.StartsWith(r + "\\", StringComparison.OrdinalIgnoreCase)) && roots.Any(r => string.Equals(r, p, StringComparison.OrdinalIgnoreCase));
+            // A folder met inside a library that is itself mapped: walked under its own name.
+            // (Pictures, Music, Videos and Documents are libraries with no path of their own, so
+            // this goes by the folder's path, not by its being under another root's.)
+            Func<string, bool> nested = p => roots.Any(r => string.Equals(r, p, StringComparison.OrdinalIgnoreCase));
 
             Action<MediaFile> add = f =>
             {

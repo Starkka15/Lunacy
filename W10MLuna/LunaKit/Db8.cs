@@ -122,6 +122,22 @@ namespace LunaKit
         /// `f` once every operation already asked of this database is done.
         public void After(Action f) { Work(f); }
 
+        /// Removes every object of `kind` outright (no tombstones), firing watches: for a
+        /// mirrored kind whose records are to be made again from its source.
+        public void PurgeKind(string kind)
+        {
+            Work(() =>
+            {
+                try
+                {
+                    var all = Objects(kind).Values.ToList();
+                    Transaction(() => { foreach (var o in all) DelOne(o, true); });
+                    LunaLog.Write("[db8] " + service + ": " + kind + " purged (" + all.Count + " objects)");
+                }
+                catch (Exception e) { LunaLog.Write("[db8] " + service + ": purge " + kind + ": " + e.Message); }
+            });
+        }
+
         /// An account's copy of something kept elsewhere (Db8.kt's syncAccount): `records`, each
         /// with its remoteId, become `kind`'s objects for the account. A new one is created, a
         /// changed one has the given properties merged in, and one no longer given is deleted

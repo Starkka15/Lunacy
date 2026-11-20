@@ -82,7 +82,19 @@ namespace LunaKit
             db.MirrorKind(ImageKind(), Permissions(Image), () => Files(db, "image"), new[] { "appCacheComplete" }, Local, added);
             db.MirrorKind(VideoKindSpec(), Permissions(VideoKind), () => Files(db, "video"), new[] { "appCacheComplete", "playbackPosition" }, Local, added);
             db.MirrorKind(AudioKindSpec(), Permissions(AudioKind), Ringtones, new[] { "bookmark", "serviced", "hasResizedThumbnails" });
+            // 0.4.9.4 indexed pictures before JS services could read extractfs, so the photos
+            // service marked their thumbnails failed for good: once, those records are made again
+            // ("unattempted"). Queued before the first pass is written back, so that pass makes them.
+            var settings = ApplicationData.Current.LocalSettings.Values;
+            if (!settings.ContainsKey(Rebuilt))
+            {
+                db.PurgeKind(Image);
+                db.PurgeKind(VideoKind);
+                db.After(() => settings[Rebuilt] = 1);
+            }
         }
+
+        private const string Rebuilt = "mediaIndexRebuilt1";
 
         /// palm://com.palm.filenotifyd/state: whether the indexer is busy and /media/internal is
         /// mounted (Video Player's "indexing" spinner). The index is brought up to date as it is
