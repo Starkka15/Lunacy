@@ -746,7 +746,6 @@ namespace LunaKit
         private static string Launched() { return new JObj().Put("returnValue", true).Put("processId", "success").ToString(); }
 
         /// Private bus only on webOS: Lunacy's own apps, the ROM's, the system, and services.
-        private bool Inside(string caller) { return shell.Privileged(caller); }
 
         public void Register(Bus bus)
         {
@@ -770,7 +769,7 @@ namespace LunaKit
             });
             bus.Register(Service, "launchPointChanges", c =>
             {
-                if (!Inside(c.AppId)) { c.Reply(Bus.Error("Unknown method \"launchPointChanges\" for category \"/\"", -1)); return; }
+                if (!c.PrivateBus) { c.Reply(Bus.Error("Unknown method \"launchPointChanges\" for category \"/\"", -1)); return; }
                 if (!c.Subscribe) { c.Reply(new JObj().Put("returnValue", false).Put("subscribed", false).Put("errorText", "Only supports subscriptions").ToString()); return; }
                 c.Reply(new JObj().Put("returnValue", true).Put("subscribed", true).ToString());
                 if (!c.Cancelled) launchPointWatchers.Add(c);
@@ -791,20 +790,20 @@ namespace LunaKit
             bus.Register(Service, "getHandlerForUrl", c => c.Reply(Handlers.HandlerForUrl(Jx.ObjOrEmpty(c.Raw))));
             bus.Register(Service, "listPackages", c =>
             {
-                if (!Inside(c.AppId)) { c.Reply(Bus.Error("Unknown method \"listPackages\" for category \"/\"", -1)); return; }
+                if (!c.PrivateBus) { c.Reply(Bus.Error("Unknown method \"listPackages\" for category \"/\"", -1)); return; }
                 c.Reply(ListPackages());
             });
             // Which windows are up, and closing one, as palm-launch -c and palm-run use them.
             bus.Register(Service, "running", c =>
             {
-                if (!Inside(c.AppId)) { c.Reply(Bus.Error("Unknown method \"running\" for category \"/\"", -1)); return; }
+                if (!c.PrivateBus) { c.Reply(Bus.Error("Unknown method \"running\" for category \"/\"", -1)); return; }
                 var list = new JArr();
                 foreach (var w in shell.RunningWindows()) list.Add(new JObj().Put("id", w.Key).Put("processid", w.Value.ToString()));
                 c.Reply(new JObj().Put("running", list).Put("returnValue", true).ToString());
             });
             bus.Register(Service, "close", c =>
             {
-                if (!Inside(c.AppId)) { c.Reply(Bus.Error("Unknown method \"close\" for category \"/\"", -1)); return; }
+                if (!c.PrivateBus) { c.Reply(Bus.Error("Unknown method \"close\" for category \"/\"", -1)); return; }
                 var pid = Jx.ObjOrEmpty(c.Raw)["processId"];
                 var text = pid is string ? (string)pid : pid != null ? Jx.Stringify(pid) : "";
                 if (text.Length == 0) { c.Reply(new JObj().Put("returnValue", false).Put("errorText", "Must provide a valid processId to close").ToString()); return; }
@@ -1072,7 +1071,7 @@ namespace LunaKit
                 var method = m;
                 bus.Register(Service, method, c =>
                 {
-                    if (!shell.Privileged(c.AppId)) { c.Reply(Bus.Error("Service does not exist: " + Service + ".", -1)); return; }
+                    if (!c.PrivateBus) { c.Reply(Bus.NoService(Service)); return; }
                     switch (method)
                     {
                         case "install": Install(c, false); break;
@@ -1101,7 +1100,7 @@ namespace LunaKit
 
         private bool Gate(Bus.Call c)
         {
-            if (shell.Privileged(c.AppId)) return true;
+            if (c.PrivateBus) return true;
             c.Reply(Bus.Error("Service does not exist: " + Installer + ".", -1));
             return false;
         }

@@ -16,10 +16,9 @@ namespace LunaKit
     /// be served by one of its kind's indexes, as on webOS. Work runs on one thread, in order;
     /// objects of a kind are cached in memory once read.
     ///
-    /// Not ported yet, beside what Docs/db8.md lists as not built: Db8.kt's mirrors (kinds kept
-    /// in line with a source outside db8: the media index, which on W10M comes from the Pictures,
-    /// Music and Videos libraries), syncAccount (the host's own contacts and calendars, Windows'
-    /// contact and appointment stores here) and the file picker's relay.
+    /// Mirrored kinds (MirrorKind: the media and file indexes, from the phone's libraries),
+    /// account syncs (SyncAccount: Windows' contacts and appointments) and the file picker's
+    /// relay (RegisterPickerRelay) are Db8.kt's.
     internal sealed class Db8
     {
         private readonly string service;
@@ -76,8 +75,11 @@ namespace LunaKit
             worker = Task.Factory.StartNew(Loop, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         }
 
+        private int dbThread = -1;
+
         private void Loop()
         {
+            dbThread = Environment.CurrentManagedThreadId;
             foreach (var a in queue.GetConsumingEnumerable())
             {
                 try { a(); }
@@ -172,12 +174,242 @@ namespace LunaKit
             });
         }
 
-        private void Handle(string method, Bus.Call call)
+        // ---- mirrors (Db8.kt's mirror) ----
+
+        /// A record's version as its source gives it (a file's size and time): when it differs
+        /// from the last pass's, the file was rewritten and its record is replaced.
+        public const string Stamp = "\u0000stamp";
+        private const int MirrorMs = 2000, MirrorWatchMs = 5000;
+        private static readonly HashSet<string> MirroredOps = new HashSet<string> { "find", "search", "watch", "get", "merge", "del" };
+        private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
+
+        private sealed class Mirror
         {
+            public Func<List<JObj>> Source;
+            public HashSet<string> Initial;
+            public Func<JObj, bool> Owns;
+            public Action Added;
+            public Func<JObj, string> Key;
+            public bool Refreshing;
+            public long Synced;
+            public Dictionary<string, string> Stamps = new Dictionary<string, string>();
+        }
+        private readonly Dictionary<string, Mirror> mirrors = new Dictionary<string, Mirror>();
+        // Where mirrors read their sources (a walk of the libraries, a picture's metadata): a
+        // thread of their own, so db8 keeps answering from what is already indexed meanwhile.
+        private readonly BlockingCollection<Action> mirrorQueue = new BlockingCollection<Action>();
+        private Task mirrorWorker;
+        private Timer mirrorTicker;
+
+        /// A kind whose truth is elsewhere (the files of the phone's libraries, for the media and
+        /// file indexes): db8 registers it, and when something queries it, brings its records
+        /// into line with `source`, at most every two seconds; while a watch is open on it, every
+        /// five. Each record is matched to its source by `path` (or `key`): a new one is created,
+        /// a changed one takes the source's properties (keeping anything an app added), one whose
+        /// source has gone is purged, each firing watches as any write does. `initial` names
+        /// properties the source sets only on a new record, which others then own; `owns` picks
+        /// the records the source speaks for; `added` runs after a pass that made new records.
+        public void MirrorKind(JObj spec, JArr permissions, Func<List<JObj>> source, IEnumerable<string> initial = null,
+            Func<JObj, bool> owns = null, Action added = null, Func<JObj, string> key = null)
+        {
+            Work(() =>
+            {
+                try
+                {
+                    PutKind(Configurator, spec);
+                    PutPermissions(Configurator, new JObj().Put("permissions", permissions));
+                }
+                catch (Exception e) { LunaLog.Write("[db8] " + service + ": mirror " + spec.Str("id") + ": " + e.Message); return; }
+                if (mirrorWorker == null)
+                {
+                    mirrorWorker = Task.Factory.StartNew(() =>
+                    {
+                        foreach (var a in mirrorQueue.GetConsumingEnumerable())
+                        {
+                            try { a(); } catch (Exception e) { LunaLog.Write("[db8] " + service + " mirrors: " + e); }
+                        }
+                    }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                }
+                var m = new Mirror
+                {
+                    Source = source,
+                    Initial = new HashSet<string>(initial ?? Enumerable.Empty<string>()),
+                    Owns = owns ?? (o => true),
+                    Added = added,
+                    Key = key ?? (o => o.Str("path"))
+                };
+                mirrors[spec.Str("id")] = m;
+                // A first pass at once, as filenotifyd indexed at boot.
+                RefreshMirror(spec.Str("id"), m);
+                if (mirrorTicker == null)
+                    mirrorTicker = new Timer(_ => Work(() =>
+                    {
+                        foreach (var kv in mirrors.ToList()) if (watches.Any(w => w.Kinds.Contains(kv.Key))) RefreshMirror(kv.Key, kv.Value);
+                    }), null, MirrorWatchMs, MirrorWatchMs);
+            });
+        }
+
+        /// A pass of `kind`'s mirror unless one is running or the last ended under two seconds
+        /// ago; on db8's thread. The source is read on the mirror thread, the difference written here.
+        private void RefreshMirror(string kind, Mirror m)
+        {
+            if (m.Refreshing || (m.Synced != 0 && Clock.ElapsedMilliseconds - m.Synced < MirrorMs)) return;
+            m.Refreshing = true;
+            try
+            {
+                mirrorQueue.Add(() =>
+                {
+                    List<JObj> files;
+                    try { files = m.Source(); }
+                    catch (Exception e) { LunaLog.Write("[db8] " + service + ": mirror " + kind + ": " + e.Message); files = null; }
+                    Work(() =>
+                    {
+                        m.Refreshing = false;
+                        m.Synced = Clock.ElapsedMilliseconds;
+                        if (files != null) ApplyMirror(kind, m, files);
+                    });
+                });
+            }
+            catch (InvalidOperationException) { m.Refreshing = false; }
+        }
+
+        /// A pass's result: `kind`'s records brought into line with what its source read. On db8's thread.
+        private void ApplyMirror(string kind, Mirror m, List<JObj> files)
+        {
+            var byPath = new Dictionary<string, JObj>();
+            var order = new List<string>();
+            var stamps = new Dictionary<string, string>();
+            foreach (var f in files)
+            {
+                var k = m.Key(f);
+                if (!byPath.ContainsKey(k)) order.Add(k);
+                byPath[k] = f;
+                var st = f[Stamp] as string;
+                if (st != null) { stamps[k] = st; f.Remove(Stamp); }
+            }
+            var current = Objects(kind).Values.Where(o => !o.Bool("_del") && m.Owns(o)).ToList();
+            var rewritten = new List<JObj>();
+            bool any = false;
+            Transaction(() =>
+            {
+                foreach (var o in current)
+                {
+                    var path = m.Key(o);
+                    JObj f;
+                    if (!byPath.TryGetValue(path, out f)) { DelOne(o, true); continue; }
+                    byPath.Remove(path);
+                    string was, now;
+                    if (m.Stamps.TryGetValue(path, out was) && stamps.TryGetValue(path, out now) && was != now) { DelOne(o, true); rewritten.Add(f); continue; }
+                    foreach (var k in m.Initial) f.Remove(k);
+                    if (f.Keys.Any(k => !Same(o[k], f[k]))) MergeOne(o, f);
+                }
+                foreach (var f in order.Where(byPath.ContainsKey).Select(k => byPath[k]).Concat(rewritten))
+                {
+                    var o = f.Copy().Put("_kind", kind).Put("_id", NewId()).Put("_rev", NextRev());
+                    Write(null, o);
+                    any = true;
+                }
+            });
+            m.Stamps = stamps;
+            if (any && m.Added != null) m.Added();
+        }
+
+        /// Equal as a source says it: the _ids db8 gave objects inside a record aren't the source's.
+        private static bool Same(object a, object b)
+        {
+            var ao = a as JObj; var bo = b as JObj;
+            if (ao != null && bo != null)
+            {
+                var ka = ao.Keys.Where(k => k != "_id").ToList();
+                var kb = new HashSet<string>(bo.Keys.Where(k => k != "_id"));
+                return ka.Count == kb.Count && ka.All(k => kb.Contains(k) && Same(ao[k], bo[k]));
+            }
+            var aa = a as JArr; var ba = b as JArr;
+            if (aa != null && ba != null)
+            {
+                if (aa.Count != ba.Count) return false;
+                for (int i = 0; i < aa.Count; i++) if (!Same(aa[i], ba[i])) return false;
+                return true;
+            }
+            if (Jx.IsNumber(a) && Jx.IsNumber(b)) return Jx.Num(a) == Jx.Num(b);
+            if ((a == null || a is JNull) && (b == null || b is JNull)) return true;
+            return Equals(a, b);
+        }
+
+        /// For a mirror's source, on the mirror thread: the mirrored `kind` brought into line now,
+        /// and its records' ids by path (an image's albumId is its folder's album, which so
+        /// exists before its first image is written).
+        public Dictionary<string, string> MirrorIds(string kind)
+        {
+            Mirror m = null;
+            List<JObj> files = null;
+            OnDbThread(() => { mirrors.TryGetValue(kind, out m); return 0; });
+            if (m != null) { try { files = m.Source(); } catch (Exception) { files = null; } }
+            return OnDbThread(() =>
+            {
+                if (m != null && files != null) { m.Synced = Clock.ElapsedMilliseconds; ApplyMirror(kind, m, files); }
+                var ids = new Dictionary<string, string>();
+                foreach (var o in Objects(kind).Values) if (!o.Bool("_del")) ids[o.Str("path")] = o.Str("_id");
+                return ids;
+            });
+        }
+
+        /// `f` on db8's thread, waited for.
+        private T OnDbThread<T>(Func<T> f)
+        {
+            if (Environment.CurrentManagedThreadId == dbThread) return f();
+            var done = new ManualResetEventSlim(false);
+            T result = default(T);
+            Exception err = null;
+            Work(() => { try { result = f(); } catch (Exception e) { err = e; } finally { done.Set(); } });
+            done.Wait();
+            if (err != null) throw err;
+            return result;
+        }
+
+        /// What an operation could read or change of a mirrored kind: the one it names and every
+        /// kind that extends it. A call by _id names no kind and reads what is there.
+        private void SyncMirrorsFor(string method, Bus.Call call)
+        {
+            if (mirrors.Count == 0 || !MirroredOps.Contains(method)) return;
+            var q = Jx.ObjOrEmpty(call.Raw).Obj("query");
+            var from = q == null ? null : q.Str("from");
+            if (string.IsNullOrEmpty(from)) return;
+            List<string> fam;
+            try { fam = Family(from); } catch (Exception) { return; }
+            foreach (var k in fam) { Mirror m; if (mirrors.TryGetValue(k, out m)) RefreshMirror(k, m); }
+        }
+
+        /// What the file picker reads (RegisterPickerRelay).
+        private static readonly HashSet<string> PickerKinds = new HashSet<string> { "com.palm.media.image.album:1", "com.palm.media.image.file:1",
+            "com.palm.media.video.file:1", "com.palm.media.types:1", "com.palm.media.audio.file:1", "com.palm.media.misc.file:1" };
+
+        /// webOS's file picker read the media index as the system UI (com.palm.systemui, a consumer
+        /// of every media kind). Lunacy's picker page runs as the app that opened it, which may not,
+        /// so it reads through palm://org.webosarchive.lunacy/media/find and media/search: the same
+        /// queries, watches included, answered as the system UI, for the media kinds only (Db8.kt).
+        public void RegisterPickerRelay(Bus bus)
+        {
+            foreach (var m in new[] { "find", "search" })
+            {
+                var method = m;
+                bus.Register("org.webosarchive.lunacy", "media/" + method, c =>
+                {
+                    var q = Jx.ObjOrEmpty(c.Raw).Obj("query");
+                    var from = q == null ? "" : q.Str("from");
+                    if (!PickerKinds.Contains(from)) { c.Reply(Error(-3963, "db: permission denied")); return; }
+                    Work(() => Handle(method, c, "com.palm.systemui"));
+                });
+            }
+        }
+
+        private void Handle(string method, Bus.Call call, string caller = null)
+        {
+            try { SyncMirrorsFor(method, call); } catch (Exception) { }
             string reply;
             try
             {
-                reply = Exec(method, call.AppId, Jx.ObjOrEmpty(call.Params.Stringify()), call);
+                reply = Exec(method, caller ?? call.AppId, Jx.ObjOrEmpty(call.Params.Stringify()), call);
             }
             catch (DbError e) { reply = Error(e.Code, e.Message); }
             catch (Exception e)
@@ -1017,7 +1249,7 @@ namespace LunaKit
             var ids = new JObj().Put("activityId", activityId).Put("activityName", "mojodb scheduled purge");
             bool done = false;
             Bus.Call adopt = null;
-            adopt = bus.Dispatch(service, "palm://com.palm.activitymanager/adopt", ids.Copy().Put("wait", true).Put("subscribe", true).ToString(), reply =>
+            adopt = bus.DispatchPrivate(service, "palm://com.palm.activitymanager/adopt", ids.Copy().Put("wait", true).Put("subscribe", true).ToString(), reply =>
             {
                 var r = Jx.ObjOrEmpty(reply);
                 if (done || !(r.Bool("adopted") || r.Str("event") == "orphan")) return;
@@ -1025,7 +1257,7 @@ namespace LunaKit
                 Work(() =>
                 {
                     try { PurgeDeleted(PurgeWindowDays); } catch (Exception e) { LunaLog.Write("[db8] " + service + ": purge failed: " + e.Message); }
-                    bus.Dispatch(service, "palm://com.palm.activitymanager/complete", ids.Copy().Put("restart", true).ToString(), _ =>
+                    bus.DispatchPrivate(service, "palm://com.palm.activitymanager/complete", ids.Copy().Put("restart", true).ToString(), _ =>
                     {
                         if (adopt != null) adopt.Cancel();
                     });

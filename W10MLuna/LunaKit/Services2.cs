@@ -167,7 +167,7 @@ namespace LunaKit
                 LunaLog.Write("[power] timeout " + t.Key + " of " + t.Owner + " fired" + (late > 60000 ? ", " + late / 1000 + " s late" : ""));
                 Background.Hold(t.HoldMs);
                 var payload = t.Params is JObj ? t.Params.ToString() : "{}";
-                bus.Dispatch(Service, t.Uri, payload, r => { if (!Jx.ObjOrEmpty(r).Bool("returnValue")) LunaLog.Write("[power] timeout " + t.Key + ": " + r); });
+                bus.DispatchPrivate(Service, t.Uri, payload, r => { if (!Jx.ObjOrEmpty(r).Bool("returnValue")) LunaLog.Write("[power] timeout " + t.Key + ": " + r); });
             }
         }
 
@@ -708,7 +708,7 @@ namespace LunaKit
                 .Put("schedule", new JObj().Put("interval", "1d"))
                 .Put("requirements", new JObj().Put("internet", true))
                 .Put("callback", new JObj().Put("method", "palm://" + Service + "/TaskCheck"));
-            bus.Dispatch(Service, "palm://com.palm.activitymanager/create", new JObj().Put("activity", activity).Put("start", true).Put("replace", true).ToString(), _ => { });
+            bus.DispatchPrivate(Service, "palm://com.palm.activitymanager/create", new JObj().Put("activity", activity).Put("start", true).Put("replace", true).ToString(), _ => { });
         }
 
         private void TaskCheck(Bus.Call c)
@@ -717,7 +717,7 @@ namespace LunaKit
             Check(true);
             var act = Jx.ObjOrEmpty(c.Raw).Obj("$activity");
             if (act != null && act.Has("activityId"))
-                bus.Dispatch(Service, "palm://com.palm.activitymanager/complete", new JObj().Put("activityId", act["activityId"]).Put("restart", true).ToString(), _ => { });
+                bus.DispatchPrivate(Service, "palm://com.palm.activitymanager/complete", new JObj().Put("activityId", act["activityId"]).Put("restart", true).ToString(), _ => { });
         }
 
         private void Check(bool background)

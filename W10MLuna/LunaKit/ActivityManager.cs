@@ -582,7 +582,7 @@ namespace LunaKit
         {
             lock (random) a.Serial = (long)(random.NextDouble() * 0xffffffffL);
             var prm = (cb.Obj("params") ?? new JObj()).Copy().Put("$activity", Info(a));
-            bus.Dispatch(Service, cb.Str("method"), prm.ToString(), reply => main.Post(() => CallbackReplied(a, reply)));
+            bus.DispatchPrivate(Service, cb.Str("method"), prm.ToString(), reply => main.Post(() => CallbackReplied(a, reply)));
         }
 
         private void CallbackReplied(Activity a, string reply)
@@ -646,7 +646,7 @@ namespace LunaKit
             if (caller.Length == 0) caller = Service;
             bool first = true;
             Bus.Call call = null;
-            call = bus.Dispatch(caller, t.Str("method"), (t.Obj("params") ?? new JObj()).ToString(), reply => main.Post(() =>
+            call = bus.DispatchPrivate(caller, t.Str("method"), (t.Obj("params") ?? new JObj()).ToString(), reply => main.Post(() =>
             {
                 if (a.TriggerCall == null || a.TriggerCall != call || a.Fired != null) return;
                 var r = Jx.ObjOrEmpty(reply);
@@ -882,7 +882,7 @@ namespace LunaKit
             var rep = ToJson(a, true, false, false, true).Put("_kind", Kind);
             if (record.Id != null) rep.Put("_id", record.Id);
             if (record.Rev != null) rep.Put("_rev", record.Rev.Value);
-            bus.Dispatch(Service, "palm://com.palm.db/put", new JObj().Put("objects", new JArr().Put(rep)).ToString(), reply => main.Post(() =>
+            bus.DispatchPrivate(Service, "palm://com.palm.db/put", new JObj().Put("objects", new JArr().Put(rep)).ToString(), reply => main.Post(() =>
             {
                 var r = Jx.ObjOrEmpty(reply);
                 var results = r.Arr("results");
@@ -897,7 +897,7 @@ namespace LunaKit
 
         private void DbDel(string id, Action done = null)
         {
-            bus.Dispatch(Service, "palm://com.palm.db/del", new JObj().Put("ids", new JArr().Put(id)).ToString(), _ => { if (done != null) main.Post(done); });
+            bus.DispatchPrivate(Service, "palm://com.palm.db/del", new JObj().Put("ids", new JArr().Put(id)).ToString(), _ => { if (done != null) main.Post(done); });
         }
 
         /// Lets activities run: once the webOS root's services are on the bus (after the
@@ -943,7 +943,7 @@ namespace LunaKit
             {
                 var q = new JObj().Put("from", Kind);
                 if (token != null) q.Put("page", token);
-                bus.Dispatch(Service, "palm://com.palm.db/find", new JObj().Put("query", q).ToString(), reply => main.Post(() =>
+                bus.DispatchPrivate(Service, "palm://com.palm.db/find", new JObj().Put("query", q).ToString(), reply => main.Post(() =>
                 {
                     var r = Jx.ObjOrEmpty(reply);
                     var arr = r.Arr("results");
@@ -1282,7 +1282,7 @@ namespace LunaKit
 
         public void Watch()
         {
-            networkWatch = bus.Dispatch(service, "palm://com.palm.connectionmanager/getstatus", "{\"subscribe\":true}", reply => main.Post(() =>
+            networkWatch = bus.DispatchPrivate(service, "palm://com.palm.connectionmanager/getstatus", "{\"subscribe\":true}", reply => main.Post(() =>
             {
                 JObj r;
                 try { r = Jx.ParseObj(reply); } catch (FormatException) { return; }

@@ -22,6 +22,9 @@ namespace LunaKit
             private readonly object gate = new object();
             private List<Action> onCancel = new List<Action>();
             public bool Cancelled { get; private set; }
+            /// On webOS's private bus: the system's own callers (JS services, the activity manager,
+            /// db8, package scripts) and apps whose ids are privileged (Bus.kt's privateBus).
+            public bool PrivateBus { get; internal set; }
 
             public Call(string appId, string service, string method, JsonObject p, Action<string> send)
             {
@@ -105,6 +108,48 @@ namespace LunaKit
             lock (handlers) handlers[service + "/" + method] = h;
         }
 
+        /// A method only the private bus reaches (Bus.kt's registerPrivate). A public caller gets
+        /// what the TouchPad gave: for a service with no public side at all (wholeService),
+        /// "Service does not exist" (the systemmanager, the device profile, the installers); for a
+        /// private method on a public service, the router's own "Unknown method".
+        public void RegisterPrivate(string service, string method, bool wholeService, Action<Call> h)
+        {
+            Register(service, method, c =>
+            {
+                if (c.PrivateBus) { h(c); return; }
+                c.Reply(wholeService ? NoService(service) : UnknownMethod(method));
+            });
+        }
+
+        public static string NoService(string service) { return Error("Service does not exist: " + service + "."); }
+        public static string UnknownMethod(string method)
+        {
+            int slash = method.LastIndexOf('/');
+            var leaf = slash < 0 ? method : method.Substring(slash + 1);
+            var category = "/" + (slash < 0 ? "" : method.Substring(0, slash));
+            return Error("Unknown method \"" + leaf + "\" for category \"" + category + "\"");
+        }
+
+        /// The ids webOS let onto the private bus whatever process they were in (Bus.kt): every
+        /// com.palm.* app and service. Palm's own apps reached private methods this way, and the
+        /// community's apps that use them took com.palm.* ids for exactly that reason.
+        public static bool Privileged(string appId) { return appId != null && appId.StartsWith("com.palm.", StringComparison.Ordinal); }
+
+        /// A call from the system itself, on the private bus.
+        public Call DispatchPrivate(string appId, string url, string parameters, Action<string> reply)
+        {
+            return Dispatch(appId, url, parameters, reply, true);
+        }
+
+        // Passwords and tokens out of the log's copy of a call's parameters (Bus.kt's redact).
+        private static readonly Regex Secret = new Regex(@"(""(?:password|passwd|pin|secret|token|authToken|accessToken|refreshToken|client_secret)""\s*:\s*)""(?:[^""\\]|\\.)*""", RegexOptions.IgnoreCase);
+        private static readonly Regex UrlSecret = new Regex(@"([?&#](?:code|access_token|id_token|refresh_token)=)[^&#""\\\s]*");
+        public static string Redact(string parameters)
+        {
+            if (string.IsNullOrEmpty(parameters)) return "";
+            return UrlSecret.Replace(Secret.Replace(parameters, m => m.Groups[1].Value + "\"â€¦\""), m => m.Groups[1].Value + "â€¦");
+        }
+
         private readonly Dictionary<string, Action<Call>> services = new Dictionary<string, Action<Call>>();
 
         /// Every method of a service, for a JS service package: the package answers what it has
@@ -126,12 +171,12 @@ namespace LunaKit
             lock (handlers) return services.ContainsKey(service) || handlers.Keys.Any(k => k.StartsWith(service + "/", StringComparison.Ordinal));
         }
 
-        public Call Dispatch(string appId, string url, string parameters, Action<string> reply)
+        public Call Dispatch(string appId, string url, string parameters, Action<string> reply, bool privateBus = false)
         {
             string service = "", method = "";
             var m = Uri.Match(url ?? "");
             if (m.Success) { service = m.Groups[1].Value; method = m.Groups[2].Value; }
-            var c = new Call(appId, service, method, J.ParseObject(parameters), reply) { Raw = string.IsNullOrEmpty(parameters) ? "{}" : parameters };
+            var c = new Call(appId, service, method, J.ParseObject(parameters), reply) { Raw = string.IsNullOrEmpty(parameters) ? "{}" : parameters, PrivateBus = privateBus || Privileged(appId) };
             Action<Call> h;
             lock (handlers) { if (!handlers.TryGetValue(service + "/" + method, out h)) services.TryGetValue(service, out h); }
             LunaLog.Write("[LunaKit] bus [" + appId + "] " + service + "/" + method + (h == null ? " UNHANDLED" : ""));
@@ -147,10 +192,7 @@ namespace LunaKit
             else
             {
                 // webOS names the category the method sits in (measured on the reference TouchPad).
-                int slash = method.LastIndexOf('/');
-                var leaf = slash < 0 ? method : method.Substring(slash + 1);
-                var category = "/" + (slash < 0 ? "" : method.Substring(0, slash));
-                c.Reply(Error(Has(service) ? "Unknown method \"" + leaf + "\" for category \"" + category + "\"" : "Service does not exist: " + service + "."));
+                c.Reply(Has(service) ? UnknownMethod(method) : NoService(service));
             }
             return c;
         }

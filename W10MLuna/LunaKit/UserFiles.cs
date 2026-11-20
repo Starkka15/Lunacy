@@ -33,6 +33,8 @@ namespace LunaKit
         public const string Root = "/media/internal";
         private readonly Dictionary<string, StorageFolder> mapped = new Dictionary<string, StorageFolder>(StringComparer.Ordinal);
         private readonly string own;
+        /// Lunacy's own /media/internal.
+        public string Own { get { return own; } }
 
         /// `own`: Lunacy's own /media/internal (LocalState\webos\media\internal).
         public UserFiles(string own) { this.own = own; }

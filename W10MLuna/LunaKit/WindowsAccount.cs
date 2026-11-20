@@ -185,7 +185,7 @@ namespace LunaKit
         {
             var record = new JObj().Put("_kind", SyncStateKind).Put("accountId", accountId).Put("capabilityProvider", capabilityProvider)
                 .Put("busAddress", Service).Put("collectionId", JNull.Value).Put("syncState", state);
-            ClearSyncState(accountId, () => bus.Dispatch(Service, "palm://com.palm.tempdb/put", new JObj().Put("objects", new JArr().Put(record)).ToString(), _ => { }));
+            ClearSyncState(accountId, () => bus.DispatchPrivate(Service, "palm://com.palm.tempdb/put", new JObj().Put("objects", new JArr().Put(record)).ToString(), _ => { }));
         }
 
         private void ClearSyncState(string accountId, Action then)
@@ -194,7 +194,7 @@ namespace LunaKit
             var where = new JArr()
                 .Put(new JObj().Put("prop", "accountId").Put("op", "=").Put("val", accountId))
                 .Put(new JObj().Put("prop", "capabilityProvider").Put("op", "=").Put("val", capabilityProvider));
-            bus.Dispatch(Service, "palm://com.palm.tempdb/del", new JObj().Put("query", new JObj().Put("from", SyncStateKind).Put("where", where)).ToString(), _ => { if (then != null) then(); });
+            bus.DispatchPrivate(Service, "palm://com.palm.tempdb/del", new JObj().Put("query", new JObj().Put("from", SyncStateKind).Put("where", where)).ToString(), _ => { if (then != null) then(); });
         }
 
         /// A kind of the account's own, extending webOS's, with its accountId index (KindSpec.kind).

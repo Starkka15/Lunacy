@@ -88,7 +88,7 @@ namespace LunaKit
             var sig = new JObj().Put("_id", "lunacy-email-carrier-defaults").Put("_kind", Email + ".carrier_defaults:1")
                 .Put("defaultSignature", "-- Sent from Lunacy");
             // After the kinds above are in: db8 works in order.
-            db.After(() => bus.Dispatch(Customization, "palm://com.palm.db/merge", new JObj().Put("objects", new JArr().Put(sig)).ToString(), reply =>
+            db.After(() => bus.DispatchPrivate(Customization, "palm://com.palm.db/merge", new JObj().Put("objects", new JArr().Put(sig)).ToString(), reply =>
             {
                 if (!Jx.ObjOrEmpty(reply).Bool("returnValue")) LunaLog.Write("[configurator] carrier defaults: " + reply);
             }));
@@ -184,7 +184,7 @@ namespace LunaKit
                 var kv = creator.Split(new[] { ':' }, 2);
                 activity.Put("creator", new JObj().Put(kv[0], kv[1]));
                 p.Remove("firstUseSafe");
-                db.After(() => bus.Dispatch("com.palm.configurator", "palm://com.palm.activitymanager/create", p.ToString(), reply =>
+                db.After(() => bus.DispatchPrivate("com.palm.configurator", "palm://com.palm.activitymanager/create", p.ToString(), reply =>
                 {
                     var r = Jx.ObjOrEmpty(reply);
                     // An activity that exists already counts as configured, as webOS's took it.

@@ -73,6 +73,8 @@
     <Compile Include="Transforms.cs" />
     <Compile Include="WebSql.cs" />
     <Compile Include="UserFiles.cs" />
+    <Compile Include="MediaFiles.cs" />
+    <Compile Include="MediaIndex.cs" />
     <Compile Include="Images.cs" />
     <Compile Include="Background.cs" />
     <Compile Include="WindowsNotifications.cs" />

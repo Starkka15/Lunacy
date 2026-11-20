@@ -90,13 +90,13 @@ namespace LunaKit
         /// Lunacy's settings apps; anything on this bus here).
         private void Class(Bus bus, string category, string scenario, Subscribers watchers)
         {
-            bus.Register(Service, category + "/status", c =>
+            bus.RegisterPrivate(Service, category + "/status", false, c =>
             {
                 c.Reply(ClassState(category, scenario).Put("action", "requested").Put("subscribed", c.Subscribe).ToString());
                 if (c.Subscribe && !c.Cancelled) watchers.Add(c);
             });
-            bus.Register(Service, category + "/getVolume", c => c.Reply(new JObj().Put("returnValue", true).Put("scenario", scenario).Put("volume", Get(category, 70)).ToString()));
-            bus.Register(Service, category + "/setVolume", c =>
+            bus.RegisterPrivate(Service, category + "/getVolume", false, c => c.Reply(new JObj().Put("returnValue", true).Put("scenario", scenario).Put("volume", Get(category, 70)).ToString()));
+            bus.RegisterPrivate(Service, category + "/setVolume", false, c =>
             {
                 var v = Integer(Jx.ObjOrEmpty(c.Raw), "volume");
                 if (v == null) { c.Reply(SchemaError); return; }
@@ -107,7 +107,7 @@ namespace LunaKit
                 c.Reply(Bus.Ok());
                 if (changed) watchers.Send(ClassState(category, scenario).Put("action", "changed").Put("changed", new JArr().Put("volume")).ToString());
             });
-            bus.Register(Service, category + "/setMuted", c =>
+            bus.RegisterPrivate(Service, category + "/setMuted", false, c =>
             {
                 var m = Jx.ObjOrEmpty(c.Raw)["muted"];
                 if (!(m is bool)) { c.Reply(SchemaError); return; }

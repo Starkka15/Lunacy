@@ -807,6 +807,9 @@
 	process.argv = ["node"];
 	process.execArgv = [];
 	process.env = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: "/home/root", USER: "root", TMPDIR: "/tmp", LANG: "en_US.UTF-8", TZ: "" };
+	// The screen's longer side in pixels, for the photos service's screennails (AndroidLuna's WebosRoot, PhotoCache).
+	var screenPx = Math.round(Math.max(screen.width, screen.height) * (window.devicePixelRatio || 1));
+	if (screenPx > 0) process.env.LUNACY_SCREEN_PX = String(screenPx);
 	process.cwd = function () { return cwd; };
 	process.chdir = function (d) {
 		var a = path.resolve(d), s = fsCall("stat", { p: a });

@@ -100,8 +100,9 @@ namespace LunaKit
             // A caller from outside the package reaches its public methods only, as ls-hubd's
             // public bus did: the package's own names, the shell's own calls and the activity manager's
             // callbacks (on webOS's private bus) are inside.
-            bool outside = !(p.Names.Contains(call.AppId) || call.AppId.StartsWith(Path.GetFileName(p.Dir) + ".", StringComparison.Ordinal)
-                || call.AppId == Db8.Configurator || call.AppId == ActivityManager.Service || call.AppId == LunaShell.SystemCaller || call.AppId == PowerService.Service);
+            // ls-hubd's public bus reached a service's public methods only; the private bus, all of
+            // them (ServiceProcess.kt: outside = !privateBus). The package's own names are inside too.
+            bool outside = !(call.PrivateBus || p.Names.Contains(call.AppId) || call.AppId.StartsWith(Path.GetFileName(p.Dir) + ".", StringComparison.Ordinal));
             var msg = new JObj().Put("t", "request").Put("id", id).Put("service", service).Put("category", category).Put("method", method)
                 .Put("payload", call.Raw).Put("sender", call.AppId).Put("outside", outside).Put("subscribe", call.Subscribe);
             if (names.ContainsKey(call.AppId)) msg.Put("fromService", true);
@@ -201,7 +202,7 @@ namespace LunaKit
                             var po = Jx.ObjOrEmpty(payload);
                             if (!po.Has("subscribe") && !po.Has("watch")) { po.Put("subscribe", true); payload = po.ToString(); }
                         }
-                        var call = shell.Bus.Dispatch(p.Name, url, payload, reply =>
+                        var call = shell.Bus.DispatchPrivate(p.Name, url, payload, reply =>
                             Send(p, new JObj().Put("t", "callResponse").Put("id", id).Put("payload", reply).Put("sender", target).Put("subscribe", m.Bool("subscribe")).ToString()));
                         lock (gate) p.Outgoing[id] = call;
                         break;

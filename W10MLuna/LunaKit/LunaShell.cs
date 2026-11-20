@@ -38,6 +38,8 @@ namespace LunaKit
         private readonly ConcurrentDictionary<int, AppWindow> windows = new ConcurrentDictionary<int, AppWindow>();
         private string deviceInfo = "{}", localeInfo = "{}", origin = "";
         private int pid = 1000;
+        /// The screen's longer side in pixels, for the photos service's screennails (PhotoCache).
+        internal int ScreenPx { get; private set; }
         private volatile string orientation = "up";
 
         /// `webView`: the XAML WebView the shell draws in. `assets`: the folder
@@ -65,6 +67,8 @@ namespace LunaKit
             Db.Register(Bus);
             TempDb = new Db8("com.palm.tempdb", null);
             TempDb.Register(Bus);
+            Db.RegisterPickerRelay(Bus);
+            new MediaIndex(null).RegisterState(Bus);
             Writable = Path.Combine(ApplicationData.Current.LocalFolder.Path, "webos");
             Fs = new WebosFs(Writable, Rom, Apps);
             Fs.User = new UserFiles(Path.Combine(Writable, "media", "internal"));
@@ -146,6 +150,12 @@ namespace LunaKit
             System.Threading.Tasks.Task.Run(async () =>
             {
                 await Fs.User.Open();
+                // Documents', photos' and videos' indexes, answered from the folders themselves
+                // (FileIndex, MediaIndex), once the libraries are known; then Photos' screennails
+                // at this screen's size (PhotoCache).
+                new FileIndex(Fs.User).Attach(Db);
+                new MediaIndex(Fs.User).Attach(Db, Bus);
+                Db.After(() => PhotoCache.Refresh(Bus, Fs.User.Own, ScreenPx));
                 SystemPrefs.InstallMedia(lunaAssets);
                 WindowsAccountTemplate.Install(Fs);
                 ShowWallpaper();
@@ -405,7 +415,7 @@ namespace LunaKit
                         Fs.Write(dest, System.Runtime.InteropServices.WindowsRuntime.WindowsRuntimeBufferExtensions.ToArray(buf), false);
                         LunaLog.Write("[LunaKit] opened from Windows: " + item.Name);
                         if (item.Name.EndsWith(".ipk", StringComparison.OrdinalIgnoreCase)) Install(dest, SystemCaller, null, true, null);
-                        else Bus.Dispatch(SystemCaller, "palm://com.palm.applicationManager/open", new JObj().Put("target", "file://" + dest).ToString(),
+                        else Bus.DispatchPrivate(SystemCaller, "palm://com.palm.applicationManager/open", new JObj().Put("target", "file://" + dest).ToString(),
                             r => { if (!Jx.ObjOrEmpty(r).Bool("returnValue")) Toast("No app here opens " + item.Name, ""); });
                     }
                     catch (Exception e) { LunaLog.Write("[LunaKit] can't open " + item.Name + ": " + e.Message); }
@@ -475,7 +485,7 @@ namespace LunaKit
             try { Directory.CreateDirectory(prefs); if (!File.Exists(ranFirstUse)) File.WriteAllText(ranFirstUse, ""); }
             catch (Exception e) { LunaLog.Write("[LunaKit] first use: can't write ran-first-use: " + e.Message); }
             if (File.Exists(profileMade)) { if (configureAfter) configurator.Activities(); return; }
-            Bus.Dispatch(SystemCaller, "palm://com.palm.accountservices/createNovaAccount", "{\"createDefaultAccount\":true}",
+            Bus.DispatchPrivate(SystemCaller, "palm://com.palm.accountservices/createNovaAccount", "{\"createDefaultAccount\":true}",
                 r => LunaLog.Write("[LunaKit] firstuse-createDefaultAccount: " + r));
             // The service answers before the account is made and writes the flag as it makes it.
             ConfigureOnceProfileMade(profileMade, 60000);
@@ -520,6 +530,7 @@ namespace LunaKit
             var di = DisplayInformation.GetForCurrentView();
             double z = di.RawPixelsPerViewPixel;
             double w = di.ScreenWidthInRawPixels / z, h = di.ScreenHeightInRawPixels / z;
+            ScreenPx = (int)Math.Max(di.ScreenWidthInRawPixels, di.ScreenHeightInRawPixels);
             deviceInfo = Profile.DeviceInfo(Math.Min(w, h), Math.Max(w, h));
             var lang = new Language(GlobalizationPreferences.Languages.FirstOrDefault() ?? "en-US");
             var langCode = lang.LanguageTag.Split('-')[0].ToLowerInvariant();
