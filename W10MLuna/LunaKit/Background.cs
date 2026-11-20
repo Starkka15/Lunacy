@@ -110,13 +110,25 @@ namespace LunaKit
             else s.Dispose();
         }
 
+        /// The process's memory against Windows' limit for it, for the log: a phone gives an app
+        /// a fixed share, and the WebView stops drawing when Lunacy reaches it.
+        internal static string Memory()
+        {
+            try
+            {
+                return "memory " + (Windows.System.MemoryManager.AppMemoryUsage >> 20) + " MB of " + (Windows.System.MemoryManager.AppMemoryUsageLimit >> 20) + " MB ("
+                    + Windows.System.MemoryManager.AppMemoryUsageLevel + ")";
+            }
+            catch (Exception e) { return "memory unknown: " + e.Message; }
+        }
+
         /// App.OnBackgroundActivated: a timer or network wake.
         public static void Activated(IBackgroundTaskInstance task)
         {
             var d = task.GetDeferral();
             task.Canceled += (s, r) => { LunaLog.Write("[background] task cancelled: " + r); Release(d); };
             var shell = Shell;
-            LunaLog.Write("[background] wake: " + task.Task.Name + (shell == null ? " (no shell: caught up at the next start)" : ""));
+            LunaLog.Write("[background] wake: " + task.Task.Name + (shell == null ? " (no shell: caught up at the next start)" : "") + ", " + Memory());
             if (shell == null) { d.Complete(); return; }
             lock (gate) { deferral = d; holdUntil = DateTime.UtcNow.AddSeconds(5); }
             shell.BackgroundWake();

@@ -161,12 +161,17 @@ namespace LunaKit
             var bg = Background.Start(this);
             Notifications.Changed += NotificationsChanged;
             Notifications.Start();
-            Windows.UI.Xaml.Application.Current.Resuming += (s, e) => { Activities.Resumed(); Power.Due(); var x = Background.Extend(); };
+            Windows.UI.Xaml.Application.Current.Resuming += (s, e) => { LunaLog.Write("[app] resumed, " + Background.Memory()); Activities.Resumed(); Power.Due(); var x = Background.Extend(); };
+            Windows.UI.Xaml.Application.Current.Suspending += (s, e) => LunaLog.Write("[app] suspending, " + Background.Memory());
+            Windows.UI.Xaml.Application.Current.EnteredBackground += (s, e) => LunaLog.Write("[app] in the background, " + Background.Memory());
+            Windows.UI.Xaml.Application.Current.LeavingBackground += (s, e) => LunaLog.Write("[app] coming to the front, " + Background.Memory());
+            Windows.System.MemoryManager.AppMemoryUsageIncreased += (s, e) => LunaLog.Write("[app] memory use rising: " + Background.Memory());
+            Windows.System.MemoryManager.AppMemoryUsageLimitChanging += (s, e) => LunaLog.Write("[app] memory limit changing " + (e.OldLimit >> 20) + " -> " + (e.NewLimit >> 20) + " MB, " + Background.Memory());
             current = this;
             View.NavigationCompleted += (s, e) => { if (e.IsSuccess && !shellLoaded) { shellLoaded = true; ShowWallpaper(); Audio.Apply(); ShellLoaded(); OpenPendingFiles(); } };
             Measure();
             LunaLog.Write("[LunaKit] shell starting as " + Profile.Name + " " + deviceInfo);
-            Windows.UI.Xaml.Window.Current.VisibilityChanged += (s, e) => display.Visible(e.Visible);
+            Windows.UI.Xaml.Window.Current.VisibilityChanged += (s, e) => { LunaLog.Write("[app] " + (e.Visible ? "visible" : "hidden") + ", " + Background.Memory()); display.Visible(e.Visible); };
             DisplayInformation.GetForCurrentView().OrientationChanged += (s, e) => Measure();
             SystemNavigationManager.GetForCurrentView().BackRequested += (s, e) =>
             {
