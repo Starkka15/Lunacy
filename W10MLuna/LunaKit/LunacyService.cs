@@ -100,7 +100,7 @@ namespace LunaKit
             });
             bus.Register(Service, "android/openSettings", c => shell.Ui(async () =>
             {
-                bool ok = await Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:about"));
+                bool ok = await OpenSettingsPanel(Jx.ObjOrEmpty(c.Raw).Str("panel"));
                 c.Reply(ok ? Bus.Ok() : Bus.Error("Windows couldn't open its settings"));
             }));
             // First Use and the permissions it asks for (Windows' own questions).
@@ -275,6 +275,20 @@ namespace LunaKit
                 default:
                     c.Reply(Bus.Error("No permission \"" + which + "\": storage, location, contacts, calendar, systemSettings, background, notifications, homeLauncher"));
                     return;
+            }
+        }
+
+        /// One of Windows' settings pages for an Android panel name (the apps' lunacyAndroidSettings,
+        /// android/openSettings's "panel"); the About page for none.
+        public static Task<bool> OpenSettingsPanel(string panel)
+        {
+            switch (panel ?? "")
+            {
+                case "wifi": return OpenSettings("ms-settings:network-wifi");
+                case "bluetooth": return OpenSettings("ms-settings:bluetooth");
+                case "date": return OpenSettings("ms-settings:dateandtime");
+                case "locale": return OpenSettings("ms-settings:regionlanguage");
+                default: return OpenSettings("ms-settings:about");
             }
         }
 

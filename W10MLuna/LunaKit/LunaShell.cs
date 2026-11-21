@@ -269,6 +269,17 @@ namespace LunaKit
         internal void ShellEvent(string what, string arg)
         {
             if (what == "exhibition" && arg == "off") { exhibiting = false; HoldForExhibition(false); }
+            // An app of Lunacy's own that stands for one of Windows' settings pages.
+            else if (what == "settings" && arg != null)
+            {
+                var app = Apps.Get(arg);
+                if (app == null) return;
+                var panel = app.Raw.GetString("lunacyAndroidSettings", "");
+                Ui(async () =>
+                {
+                    if (!await LunacyService.OpenSettingsPanel(panel)) Toast(app.Title, "Windows couldn't open its " + app.Title + " settings");
+                });
+            }
             // The launcher's Delete: an added launch point, or an installed app with its package.
             else if (what == "remove" && arg != null)
             {

@@ -285,6 +285,9 @@
 		var app = apps[appId];
 		if (!app) { log("launch: no app " + appId); return; }
 		if (app.launchPoint) { launch(app.appId, app.params || "", launchedBy, dock); return; }
+		// A shortcut to one of the platform's settings pages (Wi-Fi, Bluetooth, date and time,
+		// language): no window, no pretending Lunacy owns the setting (Android's openedInstead).
+		if (app.lunacyAndroidSettings) { H.shellEvent("settings", appId); closeLauncher(); return; }
 		var mine = appWindows(appId);
 		if (mine.length && dock) {
 			var docked = mine.filter(function (w) { return w.type === "dock"; })[0];
