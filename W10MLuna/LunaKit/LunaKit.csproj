@@ -76,6 +76,7 @@
     <Compile Include="MediaFiles.cs" />
     <Compile Include="MediaIndex.cs" />
     <Compile Include="RadioServices.cs" />
+    <Compile Include="LauncherServices.cs" />
     <Compile Include="Images.cs" />
     <Compile Include="Background.cs" />
     <Compile Include="WindowsNotifications.cs" />

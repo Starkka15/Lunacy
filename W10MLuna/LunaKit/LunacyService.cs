@@ -103,6 +103,43 @@ namespace LunaKit
                 bool ok = await OpenSettingsPanel(Jx.ObjOrEmpty(c.Raw).Str("panel"));
                 c.Reply(ok ? Bus.Ok() : Bus.Error("Windows couldn't open its settings"));
             }));
+            bus.Register(Service, "android/settingsPanels", c =>
+                c.Reply(new JObj().Put("returnValue", true).Put("panels", new JArr { "bluetooth", "date", "locale", "wifi" }).ToString()));
+            // The file picker's listing (it walks folders, so off the bus's thread).
+            bus.Register(Service, "files/list", c => Task.Run(() =>
+            {
+                string r;
+                try { r = FileListing.List(shell.Fs, Jx.ObjOrEmpty(c.Raw)); }
+                catch (Exception e) { r = Bus.Error("files/list: " + e.Message); }
+                c.Reply(r);
+            }));
+            // Software Manager: every app the launcher can show, hiding one, and Start tiles.
+            Own(bus, "launcher/listApps", "list the launcher's apps", ListLauncherApps);
+            Own(bus, "launcher/setHidden", "hide an app", c => c.Reply(SetHidden(Jx.ObjOrEmpty(c.Raw))));
+            // Lunacy is an app here, never Windows' home, and its own launcher is the one in use:
+            // Pin goes beside the switch rather than in place of it (pinBeside).
+            Own(bus, "launcher/pinStatus", "pin apps", c => c.Reply(new JObj().Put("returnValue", true).Put("lunacyIsHome", false)
+                .Put("canPin", true).Put("pinBeside", true).ToString()));
+            Own(bus, "launcher/pin", "pin apps", c => shell.Ui(async () =>
+            {
+                var app = shell.Apps.Get(Jx.ObjOrEmpty(c.Raw).Str("id"));
+                if (app == null) { c.Reply(Bus.Error("No launcher app " + Jx.ObjOrEmpty(c.Raw).Str("id"), -1)); return; }
+                var err = await StartTiles.Pin(app);
+                c.Reply(err == null ? Bus.Ok() : Bus.Error(err, -1));
+            }));
+            Own(bus, "system/setHostWallpaper", "set Windows' background", c =>
+            {
+                var p = Jx.ObjOrEmpty(c.Raw);
+                if (!p.Has("on")) { c.Reply(Bus.Error("on is required")); return; }
+                if (!p.Bool("on")) { HostWallpaper.On = false; c.Reply(new JObj().Put("returnValue", true).Put("on", false).ToString()); return; }
+                shell.Ui(async () =>
+                {
+                    var err = await HostWallpaper.Apply(shell.Fs, shell.WallpaperFile());
+                    if (err == null) HostWallpaper.On = true;
+                    c.Reply(err == null ? new JObj().Put("returnValue", true).Put("on", true).ToString() : Bus.Error(err));
+                });
+            });
+            HiddenApps.Changed += () => { shell.RefreshLauncher(); LauncherAppsChanged(); };
             // First Use and the permissions it asks for (Windows' own questions).
             bus.Register(Service, "permissions/status", c => c.Reply(PermissionsStatus()));
             bus.Register(Service, "permissions/request", RequestPermission);
@@ -156,6 +193,44 @@ namespace LunaKit
         {
             var a = shell.Apps.Get(appId);
             return AccountPageHosts.Contains(appId) && a != null && !a.Removable;
+        }
+
+        // ---- the launcher's apps, for Software Manager ----
+
+        private const string SoftwareManager = "com.palm.app.swmanager";
+        private readonly Subscribers launcherWatchers = new Subscribers();
+
+        private void ListLauncherApps(Bus.Call c)
+        {
+            c.Reply(LauncherApps());
+            if (c.Subscribe && !c.Cancelled) launcherWatchers.Add(c);
+        }
+
+        /// The launcher's apps changed (installed, removed, hidden, shown): watchers hear the new list.
+        public void LauncherAppsChanged() { if (launcherWatchers.Count > 0) launcherWatchers.Send(LauncherApps()); }
+
+        private string LauncherApps()
+        {
+            var hidden = HiddenApps.All();
+            var list = new JArr();
+            foreach (var a in shell.Apps.All().Where(x => x.Visible).OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase))
+            {
+                list.Add(new JObj().Put("id", a.Id).Put("title", a.Title).Put("vendor", a.Vendor ?? "").Put("version", a.Version ?? "")
+                    .Put("icon", a.Url(a.Icon)).Put("kind", "webos").Put("hidden", hidden.Contains(a.Id))
+                    // Software Manager is how an app comes back, so it can't hide itself.
+                    .Put("canHide", a.Id != SoftwareManager));
+            }
+            return new JObj().Put("returnValue", true).Put("apps", list).ToString();
+        }
+
+        private string SetHidden(JObj p)
+        {
+            var id = p.Str("id");
+            if (id.Length == 0 || !p.Has("hidden")) return Bus.Error("setHidden needs an id and hidden", -1);
+            if (id == SoftwareManager) return Bus.Error("Software Manager can't be hidden: it is how hidden apps come back", -1);
+            if (shell.Apps.Get(id) == null) return Bus.Error("No launcher app " + id, -1);
+            HiddenApps.Set(id, p.Bool("hidden"));
+            return Bus.Ok();
         }
 
         private void Own(Bus bus, string method, string what, Action<Bus.Call> h)
@@ -392,6 +467,7 @@ namespace LunaKit
             return J.Obj(J.P("returnValue", true), J.P("lunacy", new J.Raw(lunacy)), J.P("android", new J.Raw(host)),
                 J.P("webos", new J.Raw(webos)), J.P("device", new J.Raw(device)), J.P("webview", new J.Raw(webview)),
                 J.P("display", new J.Raw(display)), J.P("layout", new J.Raw(layout)), J.P("software", software),
+                J.P("hostWallpaper", HostWallpaper.On),
                 J.P("hostWallpaper", false), J.P("colourNotificationIcons", true), J.P("navigationMode", "buttons"),
                 J.P("androidNotifications", false), J.P("notificationLight", false));
         }

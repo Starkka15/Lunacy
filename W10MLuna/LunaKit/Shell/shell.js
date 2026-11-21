@@ -13,14 +13,19 @@
 	var apps = {};
 	// The apps, and the launch points apps have added (ApplicationManager's addLaunchPoint), each
 	// a launcher entry that launches its app with its params.
-	function takeApps(list, points) {
+	// The apps hidden with Software Manager (HiddenApps.cs): still installed and still opened by
+	// other apps, but left off the launcher's pages and the dock.
+	var hiddenApps = {};
+	function takeApps(list, points, hidden) {
 		apps = {};
-		list.forEach(function (a) { apps[a.id] = a; });
+		hiddenApps = {};
+		(hidden || []).forEach(function (id) { hiddenApps[id] = true; });
+		list.forEach(function (a) { if (hiddenApps[a.id]) { a.visible = false; } apps[a.id] = a; });
 		(points || []).forEach(function (p) {
 			apps[p.id] = { id: p.id, title: p.title, icon: p.icon, launchPoint: true, appId: p.appId, params: p.params, removable: p.removable, visible: true };
 		});
 	}
-	takeApps(info.apps, info.launchPoints);
+	takeApps(info.apps, info.launchPoints, info.hidden);
 	var zoomApps = {};
 	(info.zoomApps || []).forEach(function (id) { zoomApps[id] = true; });
 
@@ -643,7 +648,7 @@
 		var items = $("dock-items");
 		items.innerHTML = "";
 		var ids = stored("dock", ["com.palm.app.browser", "com.palm.app.email", "com.palm.app.calendar", "com.palm.app.enyo-findapps"])
-			.filter(function (id) { return apps[id]; }).slice(0, 4);
+			.filter(function (id) { return apps[id] && !hiddenApps[id]; }).slice(0, 4);
 		var slotW = stageSize().w / (ids.length + 1);
 		var size = Math.min(59, slotW * 0.78);
 		ids.forEach(function (id) {
@@ -852,7 +857,7 @@
 		run: run,
 		launch: function (appId, params, by) { launch(appId, params, by); },
 		setWallpaper: setWallpaper,
-		setApps: function (list, points) { takeApps(JSON.parse(list), JSON.parse(points || "[]")); buildLauncher(); buildDock(); },
+		setApps: function (list, points, hidden) { takeApps(JSON.parse(list), JSON.parse(points || "[]"), JSON.parse(hidden || "[]")); buildLauncher(); buildDock(); },
 		closeApp: function (appId) { appWindows(appId).forEach(function (w) { closeWindow(w.id, true); }); updateMode(); },
 		setExhibition: function (on, list) { setExhibition(Boolean(on), list ? JSON.parse(list) : null); },
 		exhibiting: function () { return exhibitionOn; },

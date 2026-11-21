@@ -17,6 +17,8 @@ namespace LunaHost
                 Window.Current.Content = frame;
             }
             if (frame.Content == null) frame.Navigate(typeof(MainPage), e.Arguments);
+            // A Start tile of a webOS app (Software Manager's Pin): that app opens.
+            LunaKit.LunaShell.Activated(e.Arguments);
             Window.Current.Activate();
         }
 

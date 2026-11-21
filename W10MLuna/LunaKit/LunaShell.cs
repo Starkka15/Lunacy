@@ -114,7 +114,7 @@ namespace LunaKit
             SystemPrefs.Fs = Fs;
             SystemPrefs.Rom = Rom;
             lunaAssets = Path.Combine(assets, "luna");
-            SystemPrefs.PreferenceChanged += (key, value) => { if (key == "wallpaper") ShowWallpaper(); };
+            SystemPrefs.PreferenceChanged += (key, value) => { if (key == "wallpaper") { ShowWallpaper(); FollowWallpaper(); } };
         }
 
         internal readonly LunacyService Lunacy;
@@ -181,7 +181,7 @@ namespace LunaKit
             Windows.System.MemoryManager.AppMemoryUsageIncreased += (s, e) => LunaLog.Write("[app] memory use rising: " + Background.Memory());
             Windows.System.MemoryManager.AppMemoryUsageLimitChanging += (s, e) => LunaLog.Write("[app] memory limit changing " + (e.OldLimit >> 20) + " -> " + (e.NewLimit >> 20) + " MB, " + Background.Memory());
             current = this;
-            View.NavigationCompleted += (s, e) => { if (e.IsSuccess && !shellLoaded) { shellLoaded = true; ShowWallpaper(); Audio.Apply(); ShellLoaded(); OpenPendingFiles(); } };
+            View.NavigationCompleted += (s, e) => { if (e.IsSuccess && !shellLoaded) { shellLoaded = true; ShowWallpaper(); Audio.Apply(); ShellLoaded(); OpenPendingFiles(); OpenPendingTile(); } };
             Measure();
             LunaLog.Write("[LunaKit] shell starting as " + Profile.Name + " " + deviceInfo);
             Windows.UI.Xaml.Window.Current.VisibilityChanged += (s, e) => { LunaLog.Write("[app] " + (e.Visible ? "visible" : "hidden") + ", " + Background.Memory()); display.Visible(e.Visible); };
@@ -231,6 +231,48 @@ namespace LunaKit
             var path = SystemPrefs.WallpaperPath();
             var url = string.Join("/", path.Split('/').Select(Uri.EscapeDataString));
             Evaluate("window.__lunacyShell&&__lunacyShell.setWallpaper(" + J.Str(url) + "," + J.Str("/__lunacy/luna/wallpapers/" + SystemService.DefaultWallpaper) + ")");
+        }
+
+        /// The webOS wallpaper's file, for Windows' background (HostWallpaper).
+        internal string WallpaperFile() { return SystemPrefs.WallpaperPath(); }
+
+        /// webOS's wallpaper changed: Windows' background follows it when Screen & Lock says so.
+        private void FollowWallpaper()
+        {
+            if (!HostWallpaper.On) return;
+            Ui(async () =>
+            {
+                var err = await HostWallpaper.Apply(Fs, WallpaperFile());
+                if (err != null) LunaLog.Write("[wallpaper] Windows' background: " + err);
+            });
+        }
+
+        /// The apps hidden from the launcher (Software Manager), for the shell's page.
+        private static string HiddenJson()
+        {
+            return "[" + string.Join(",", HiddenApps.All().Select(J.Str)) + "]";
+        }
+
+        // ---- Start tiles: a webOS app pinned to Windows' Start (StartTiles) ----
+
+        private static string pendingTileApp;
+
+        /// Windows launched Lunacy from a tile (or with arguments naming an app): that app opens,
+        /// once the shell is up.
+        public static void Activated(string arguments)
+        {
+            var app = StartTiles.AppOf(arguments);
+            if (app == null) return;
+            pendingTileApp = app;
+            var s = current;
+            if (s != null && s.shellLoaded) s.OpenPendingTile();
+        }
+
+        private void OpenPendingTile()
+        {
+            var app = pendingTileApp;
+            pendingTileApp = null;
+            if (app != null && Apps.Get(app) != null) Launch(app, "", "com.palm.launcher");
         }
 
         // ---- Exhibition (AndroidLuna's ExhibitionController, from the host's side) ----
@@ -335,7 +377,7 @@ namespace LunaKit
         /// The launcher and dock drawn again: the app list or the launch points changed.
         internal void RefreshLauncher()
         {
-            Evaluate("window.__lunacyShell&&__lunacyShell.setApps(" + J.Str(Apps.Json()) + "," + J.Str(LaunchPointsJson()) + ")");
+            Evaluate("window.__lunacyShell&&__lunacyShell.setApps(" + J.Str(Apps.Json()) + "," + J.Str(LaunchPointsJson()) + "," + J.Str(HiddenJson()) + ")");
         }
 
         /// The installed apps changed on disk: rescan, configure what came, and tell whoever watches.
@@ -353,6 +395,7 @@ namespace LunaKit
             Dock.LaunchPointsChanged();
             Search.AppsChanged();
             RefreshLauncher();
+            Lunacy.LauncherAppsChanged();
         }
 
         /// Installs a package (an .ipk by URL or webOS path) as Preware did: toasts for its start
@@ -574,7 +617,7 @@ namespace LunaKit
             return J.Obj(J.P("phone", Profile.Name == "PRE3"), J.P("layoutWidth", FixedViewport.LayoutWidth),
                 J.P("hour24", Windows.System.UserProfile.GlobalizationPreferences.Clocks.FirstOrDefault() == Windows.Globalization.ClockIdentifiers.TwentyFourHour),
                 J.P("zoomApps", new J.Raw("[" + string.Join(",", FixedViewport.OnIds(Apps.All()).Select(J.Str)) + "]")),
-                J.P("apps", new J.Raw(Apps.Json())), J.P("launchPoints", new J.Raw(LaunchPointsJson())));
+                J.P("apps", new J.Raw(Apps.Json())), J.P("launchPoints", new J.Raw(LaunchPointsJson())), J.P("hidden", new J.Raw(HiddenJson())));
         }
 
         internal string Orientation { get { return orientation; } }

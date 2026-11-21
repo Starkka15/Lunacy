@@ -79,8 +79,12 @@ enyo.kind({
 	},
 	gotPinStatus: function(inSender, r) {
 		var pinning = Boolean(r && !r.lunacyIsHome && r.canPin);
-		if (pinning === this.pinning) { return; }
+		// Where Lunacy's own launcher stays in use beside the host's home screen (Windows 10
+		// Mobile's Start), Pin goes next to the switch rather than in its place.
+		var beside = Boolean(pinning && r.pinBeside);
+		if (pinning === this.pinning && beside === this.pinBeside) { return; }
 		this.pinning = pinning;
+		this.pinBeside = beside;
 		if (this.rendered) { this.renderList("webos"); }
 	},
 	gotApps: function(inSender, r) {
@@ -140,11 +144,7 @@ enyo.kind({
 					{content: enyo.string.escapeHtml(a.title), className: "appTitle enyo-text-ellipsis"},
 					{content: enyo.string.escapeHtml(details || ""), className: "appVendor enyo-text-ellipsis"}
 				]},
-				{kind: "HFlexBox", align: "center", components: [this.pinning && kind === "webos" ?
-					{kind: "Button", caption: $L("Pin"), className: "pin-button", appId: a.id, onclick: "pinClicked"} :
-					{name: "switch_" + kind + "_" + i, kind: "ToggleButton", onLabel: $L("Show"), offLabel: $L("Hide"),
-						state: !a.hidden, disabled: !a.canHide, appId: a.id, onChange: "switched"}
-				]}
+				{kind: "HFlexBox", align: "center", components: this.rowControls(a, kind, i)}
 			]}, {owner: this});
 			if (this.$["switch_" + kind + "_" + i]) { this.switches[a.id] = this.$["switch_" + kind + "_" + i]; }
 		}
@@ -182,6 +182,14 @@ enyo.kind({
 			var s = this.switches && this.switches[apps[i].id];
 			if (s && s.getState() === Boolean(apps[i].hidden)) { s.setState(!apps[i].hidden); }
 		}
+	},
+	//* A row's Pin button, its Show/Hide switch, or both side by side (pinBeside).
+	rowControls: function(a, kind, i) {
+		var pin = {kind: "Button", caption: $L("Pin"), className: "pin-button", appId: a.id, onclick: "pinClicked"};
+		var toggle = {name: "switch_" + kind + "_" + i, kind: "ToggleButton", onLabel: $L("Show"), offLabel: $L("Hide"),
+			state: !a.hidden, disabled: !a.canHide, appId: a.id, onChange: "switched"};
+		if (!this.pinning || kind !== "webos") { return [toggle]; }
+		return this.pinBeside ? [pin, toggle] : [pin];
 	},
 	pinClicked: function(inSender) {
 		this.$.pin.call({id: inSender.appId});
