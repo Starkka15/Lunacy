@@ -21,10 +21,10 @@ services are the same on both, so they aren't listed.
 - [ ] `com.palm.wifi`: getstatus, setstate (WifiService.kt).
 - [ ] `com.palm.btmonitor`: radio state, notifications, radioon/radiooff (BtMonitorService.kt).
 - [ ] `org.webosarchive.lunacy.oauth`: listProviders, signIn, redirected, token, forget (OAuth.kt) - Gmail and Outlook mail.
-- [ ] Media index: `com.palm.media.image.file:1`, `video.file:1`, `image.album:1` from the files (MediaIndex.kt), `com.palm.filenotifyd/state`, `org.webosarchive.lunacy/media/find` and `media/search`.
-- [ ] File index: `com.palm.media.misc.file:1` for Quick Office and Adobe Reader (FileIndex.kt).
+- [x] Media index: `com.palm.media.image.file:1`, `video.file:1`, `image.album:1` from the files (MediaIndex.kt), `com.palm.filenotifyd/state`, `org.webosarchive.lunacy/media/find` and `media/search`.
+- [x] File index: `com.palm.media.misc.file:1` for Quick Office and Adobe Reader (FileIndex.kt).
 - [ ] Music library: songs, albums, artists, genres and playlists for the music player (MusicLibrary.kt), from the Music library here; the audio kind holds only the ringtones until then.
-- [ ] Photos' screennails at the screen's size, LUNACY_SCREEN_PX (PhotoCache.kt).
+- [x] Photos' screennails at the screen's size, LUNACY_SCREEN_PX (PhotoCache.kt).
 - [ ] systemmanager's Exchange security policies and device lock (SecurityPolicy.kt).
 - [ ] `org.webosarchive.lunacy`: files/list (the file picker), launcher/listApps, launcher/setHidden, launcher/pinStatus, launcher/pin, system/setHostWallpaper, system/setNotificationIcons.
 

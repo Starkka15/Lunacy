@@ -95,5 +95,7 @@
     <uap:Capability Name="appointments" />
     <uap3:Capability Name="userNotificationListener" />
     <DeviceCapability Name="location" />
+    <DeviceCapability Name="radios" />
+    <DeviceCapability Name="wiFiControl" />
   </Capabilities>
 </Package>

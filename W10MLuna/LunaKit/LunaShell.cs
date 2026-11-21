@@ -55,6 +55,9 @@ namespace LunaKit
             bridge = new LunaHostBridge(this);
             new SystemProperties(Profile).Register(Bus);
             new ConnectionManager().Register(Bus);
+            new DeviceProfileService(Profile).Register(Bus);
+            new WifiService().Register(Bus);
+            new BtMonitorService().Register(Bus);
             new Keys(Dispatcher).Register(Bus);
             display = new DisplayService(this);
             display.Register(Bus);
